@@ -1,0 +1,10 @@
+# Once a month GitHub checks the outside actions the check uses (pinned to exact commits in workflows/check.yml)
+# and proposes any update as a pull request. It runs the check like any other change; merge it only on green.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "Check tools"

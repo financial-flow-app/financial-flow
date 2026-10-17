@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; form-action 'none'; img-src 'self' data:; object-src 'none'; base-uri 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>Financial Flow</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<meta name="theme-color" content="#2563eb">
+<script type="module" src="src/app.js"></script>
+</head>
+<body>
+<header class="top">
+  <h1>Financial Flow</h1>
+  <button type="button" class="chip" id="changes-chip" hidden></button>
+</header>
+<main id="main" tabindex="-1">
+  <p class="loading">Loading…</p>
+</main>
+<nav class="tabs" aria-label="Sections">
+  <button type="button" data-tab="dashboard" aria-current="page">Dashboard</button>
+  <button type="button" data-tab="month">Month</button>
+  <button type="button" data-tab="giving">Giving</button>
+  <button type="button" data-tab="file">File</button>
+</nav>
+<noscript><p class="notice">Financial Flow needs JavaScript to run.</p></noscript>
+</body>
+</html>

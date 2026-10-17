@@ -1,0 +1,28 @@
+# Runs on every pull request and on main. A green check means every test passes:
+# no personal-data files, the build stamp is current, the engine matches Excel's recorded results,
+# exports keep the workbook intact, and the page's security rules hold.
+name: Check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Outside actions are pinned to an exact commit, so a hijacked release tag can't change what runs here.
+# To update one, look up the new release's commit and replace both the hash and the version note.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Tests
+        run: npm test

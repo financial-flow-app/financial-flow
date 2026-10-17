@@ -1,0 +1,9 @@
+node_modules/
+test-output/
+# Real workbooks never belong here; only the synthetic files in fixtures/ are allowed.
+*.xlsx
+!fixtures/*.xlsx
+*.xlsm
+*.xls
+.env
+.claude/
