@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- A ± button beside the “Moved into” fields, for phone number pads without a minus key.
+- Export names show the time in 12-hour form, for example “FFOS 2026-10-18 12.01 AM.xlsx”.
+
 ## 0.5.0 (first release)
 
 - Dashboard, Month, Giving and File screens for workbooks in the FFOS 4.0 format.
