@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.2
+
+- The app turns with the phone. It used to stay upright when the phone was turned sideways. An app already on the home screen may take up to a day to pick this up; adding it to the home screen again makes it immediate (export first, to be safe).
+
 ## 0.5.1
 
 - A ± button beside the “Moved into” fields, for phone number pads without a minus key.

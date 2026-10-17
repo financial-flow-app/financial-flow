@@ -46,6 +46,7 @@ test('manifest: installable on Android, icons are real PNGs of the stated size',
   assert.equal(m.display, 'standalone');
   assert.equal(m.start_url, './');
   assert.equal(m.scope, './');
+  assert.ok(m.orientation === undefined || m.orientation === 'any', 'the installed app must turn with the phone (no orientation lock)');
   for (const need of [['192x192', 'any'], ['512x512', 'any'], ['512x512', 'maskable']]) {
     assert.ok(m.icons.some((i) => i.sizes === need[0] && i.purpose === need[1]), `icon ${need.join(' ')}`);
   }

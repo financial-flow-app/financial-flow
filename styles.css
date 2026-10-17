@@ -181,3 +181,10 @@ textarea { width: 100%; min-height: 72px; padding: 8px 10px; border: 1px solid v
 /* The ± button on fields that can be negative */
 .input-wrap.has-sign input { padding-left: 40px; }
 .sign { position: absolute; left: 2px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; border: 0; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-size: 1.1rem; font-weight: 700; }
+
+/* Phone turned sideways (short screen): let the top bar scroll away and slim the tabs. */
+@media (max-height: 480px) {
+  .top { position: static; }
+  .tabs button { min-height: 44px; }
+  body { padding-bottom: calc(52px + env(safe-area-inset-bottom)); }
+}
