@@ -4,7 +4,7 @@ A phone app for a monthly household-finance update and a dashboard, on top of an
 The workbook stays the record: the app imports it, you enter the month and your donations on the phone,
 and the app exports the same workbook with your entries written in. If the app ever goes away, Excel carries on.
 
-**Open the app:** https://financial-flow-app.github.io/financial-flow/
+**Open the app:** https://financial-flow-app.github.io/financial-flow/ · **Guide:** [wiki](https://github.com/financial-flow-app/financial-flow/wiki) · **Versions:** [releases](https://github.com/financial-flow-app/financial-flow/releases) and [CHANGELOG](CHANGELOG.md)
 
 ## What it does
 
