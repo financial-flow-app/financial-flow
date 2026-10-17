@@ -138,13 +138,30 @@ export const changeCount = (base, current) => changeSummary(base, current).total
 
 // ---------- Export file name and the older-copy check ----------
 
-const STAMP_IN_NAME = /\s\d{4}-\d{2}-\d{2} \d{4}$/;
+// A date and time an earlier export put in the name: "2026-10-17 2.32 PM" (or the older "2026-10-17 1432").
+const STAMP_IN_NAME = /\s\d{4}-\d{2}-\d{2} (\d{1,2}\.\d{2} [AP]M|\d{4})$/i;
 
-/** "FFOS.xlsx" or "FFOS 2026-10-01 0902.xlsx" -> "FFOS 2026-10-17 1432.xlsx" (local time; no ":" for Windows). */
+/**
+ * "FFOS.xlsx" or "FFOS 2026-10-01 9.02 AM.xlsx" -> "FFOS 2026-10-18 12.01 AM.xlsx".
+ * Local time, 12-hour, with a dot instead of ":" (Windows doesn't allow ":" in file names).
+ */
 export function exportFileName(name, at = new Date()) {
   const base = String(name || 'FFOS.xlsx').replace(/\.xlsx$/i, '').replace(STAMP_IN_NAME, '') || 'FFOS';
   const p = (n) => String(n).padStart(2, '0');
-  return `${base} ${at.getFullYear()}-${p(at.getMonth() + 1)}-${p(at.getDate())} ${p(at.getHours())}${p(at.getMinutes())}.xlsx`;
+  const h = at.getHours() % 12 || 12;
+  const ampm = at.getHours() < 12 ? 'AM' : 'PM';
+  return `${base} ${at.getFullYear()}-${p(at.getMonth() + 1)}-${p(at.getDate())} ${h}.${p(at.getMinutes())} ${ampm}.xlsx`;
+}
+
+/** The ± button: "50" -> "-50", "-50" -> "50", "" -> "-" (ready to type), "-" -> "". Text that isn't a number stays as it is. */
+export function flipSign(text) {
+  const t = String(text ?? '').trim();
+  if (t === '') return '-';
+  if (t === '-') return '';
+  if (parseAmount(t).error) return t;
+  if (t.startsWith('-')) return t.slice(1).trim();
+  if (/^\(.*\)$/.test(t)) return t.slice(1, -1).trim();
+  return `-${t}`;
 }
 
 /**

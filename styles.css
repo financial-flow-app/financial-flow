@@ -177,3 +177,7 @@ textarea { width: 100%; min-height: 72px; padding: 8px 10px; border: 1px solid v
 /* Banners: update ready, export reminder */
 .banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-radius: var(--radius); margin: 12px 0; font-weight: 600; font-size: 0.95rem; }
 .banner .btn { flex: none; }
+
+/* The ± button on fields that can be negative */
+.input-wrap.has-sign input { padding-left: 40px; }
+.sign { position: absolute; left: 2px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; border: 0; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-size: 1.1rem; font-weight: 700; }

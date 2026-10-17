@@ -346,9 +346,16 @@ function field(i, f, sub = false) {
   const clear = h('button', { type: 'button', class: 'clear', 'aria-label': `Use the automatic value for ${f.label}`, title: 'Use automatic' }, '×');
   const error = h('span', { class: 'error', role: 'alert', hidden: true });
   const hint = isFormula ? 'formula set in Excel; change it there' : f.hint;
+  // Money moved out of an investment is negative, and some phone number pads have no minus key.
+  const sign = f.key === 'deposits' && !isFormula
+    ? h('button', {
+      type: 'button', class: 'sign', 'aria-label': `Plus or minus for ${f.label}`, title: 'Plus or minus',
+      onpointerdown: (e) => e.preventDefault(), // keep the keyboard open
+    }, '±')
+    : null;
   const el = h('div', { class: `field${sub ? ' sub' : ''}` },
     h('label', { for: id }, f.label, f.required ? h('span', { class: 'req' }, 'required') : null, hint ? h('span', { class: 'hint' }, hint) : null),
-    h('div', { class: 'input-wrap' }, input, isFormula ? null : clear),
+    h('div', { class: `input-wrap${sign ? ' has-sign' : ''}` }, sign, input, isFormula ? null : clear),
     error);
   const commit = (value) => {
     if (!entry.setEntry(state.data, i, f.key, f.slot, value)) return;
@@ -371,6 +378,16 @@ function field(i, f, sub = false) {
     else input.blur();
   });
   clear.addEventListener('click', () => { error.hidden = true; input.removeAttribute('aria-invalid'); commit(null); });
+  sign?.addEventListener('click', () => {
+    const next = entry.flipSign(input.value);
+    input.value = next;
+    const p = entry.parseAmount(next);
+    if (next !== '-' && next !== '' && !p.error) commit(p.value); // a number: save the flipped value
+    else {
+      input.focus(); // "-": ready for the digits
+      input.setSelectionRange(next.length, next.length);
+    }
+  });
   fieldRefs.push({ f, input, clear });
   return el;
 }

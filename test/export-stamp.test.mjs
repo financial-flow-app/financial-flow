@@ -7,17 +7,32 @@ import { readZip, entryText } from '../src/zip.js';
 import { openWorkbook, exportWorkbook, readStamp } from '../src/xlsx.js';
 import { importWorkbook } from '../src/import.js';
 import { dateSerial } from '../src/ffos.js';
-import { setEntry, addGift, workbookEdits, exportFileName, olderCopyCheck, changeSummary } from '../src/entry.js';
+import { setEntry, addGift, workbookEdits, exportFileName, flipSign, olderCopyCheck, changeSummary } from '../src/entry.js';
 
 const fixture = (f) => readFileSync(new URL(`../fixtures/${f}`, import.meta.url));
 const at = new Date(2026, 9, 17, 14, 32);
 
-test('export file name: date and time, no colon, no piling up of old stamps', () => {
-  assert.equal(exportFileName('FFOS.xlsx', at), 'FFOS 2026-10-17 1432.xlsx');
-  assert.equal(exportFileName('FFOS 2026-10-01 0902.xlsx', at), 'FFOS 2026-10-17 1432.xlsx');
-  assert.equal(exportFileName('Household budget.XLSX', at), 'Household budget 2026-10-17 1432.xlsx');
-  assert.equal(exportFileName(null, at), 'FFOS 2026-10-17 1432.xlsx');
+test('export file name: date and 12-hour time, no colon, no piling up of old stamps', () => {
+  assert.equal(exportFileName('FFOS.xlsx', at), 'FFOS 2026-10-17 2.32 PM.xlsx');
+  assert.equal(exportFileName('FFOS 2026-10-01 9.02 AM.xlsx', at), 'FFOS 2026-10-17 2.32 PM.xlsx');
+  assert.equal(exportFileName('FFOS 2026-10-01 0902.xlsx', at), 'FFOS 2026-10-17 2.32 PM.xlsx', 'names from 0.5.0');
+  assert.equal(exportFileName('Household budget.XLSX', at), 'Household budget 2026-10-17 2.32 PM.xlsx');
+  assert.equal(exportFileName(null, at), 'FFOS 2026-10-17 2.32 PM.xlsx');
   assert.ok(!exportFileName('FFOS.xlsx', at).includes(':'));
+  // Around midnight and noon.
+  assert.equal(exportFileName('FFOS.xlsx', new Date(2026, 9, 18, 0, 1)), 'FFOS 2026-10-18 12.01 AM.xlsx');
+  assert.equal(exportFileName('FFOS.xlsx', new Date(2026, 9, 18, 12, 0)), 'FFOS 2026-10-18 12.00 PM.xlsx');
+  assert.equal(exportFileName('FFOS.xlsx', new Date(2026, 9, 18, 23, 59)), 'FFOS 2026-10-18 11.59 PM.xlsx');
+});
+
+test('± button: flips the sign, or starts a negative number', () => {
+  assert.equal(flipSign('50'), '-50');
+  assert.equal(flipSign('-50'), '50');
+  assert.equal(flipSign('1,234.50'), '-1,234.50');
+  assert.equal(flipSign('(75)'), '75');
+  assert.equal(flipSign(''), '-');
+  assert.equal(flipSign('-'), '');
+  assert.equal(flipSign('abc'), 'abc');
 });
 
 for (const f of ['ffos-template.xlsx', 'ffos-template-excel.xlsx']) {
