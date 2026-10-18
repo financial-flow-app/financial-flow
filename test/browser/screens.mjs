@@ -1,16 +1,19 @@
-// The screens in a real browser: Chromium at phone size (375 x 812), on the local test server.
-// It uses the app the way a person would: import a synthetic workbook, read the Dashboard, fill a
-// month, add a donation, reload, export through the share sheet, read the shared file back with
-// the app's own importer, reload again, then add and edit a goal and visit the More pages. It stops at the first case that fails and says which
-// one, after how long, and what the screen showed.
+// The screens in a real browser at phone size (375 x 812), on the local test server: Chromium (the
+// engine of Android's Chrome) by default, or WebKit (the engine of every iPhone browser) with
+// BROWSER=webkit. It uses the app the way a person would: import a synthetic workbook, read the
+// Dashboard, visit the More pages, fill a month, add a donation, reload, export through the share
+// sheet, read the shared file back with the app's own importer, reload again, then add and edit a
+// goal. It stops at the first case that fails and says which one, after how long, and what the
+// screen showed.
 //
 // The clock is fixed at Nov 10, 2026, noon UTC, so every run sees the same months and statuses.
 // Every wait is for a condition with a deadline, never a fixed time (GitHub's machines are slower).
 //
 // Needs Playwright, which the Check workflow installs for this step only (it is not a dependency):
 //   npm install --no-save --no-package-lock playwright@1.63.0
-//   npx playwright install chromium
-//   node test/browser/screens.mjs
+//   npx playwright install chromium webkit
+//   node test/browser/screens.mjs                      (Chromium)
+//   BROWSER=webkit node test/browser/screens.mjs       (WebKit)
 
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
@@ -18,7 +21,7 @@ import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
 import { importWorkbook } from '../../src/import.js';
 import { calculate } from '../../src/calc.js';
 import { dashboardView } from '../../src/dashboard.js';
@@ -92,7 +95,8 @@ const base = `http://127.0.0.1:${port}/`;
 const book = await fixture(base, SCENARIO);
 const before = await importWorkbook(book.bytes);
 const OCT = before.months.findIndex((m) => m.ym === '2026-10');
-const browser = await chromium.launch();
+const ENGINE = process.env.BROWSER === 'webkit' ? 'WebKit' : 'Chromium';
+const browser = await (ENGINE === 'WebKit' ? webkit : chromium).launch();
 const context = await browser.newContext({ ...PHONE, locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' });
 
 // The share sheet: Android's would offer Quick Share; this one keeps the file for the check.
@@ -416,7 +420,7 @@ step('Goals: Edit changes the type, and fields it no longer uses are cleared', a
 
 // ---------- run them, in order, stopping at the first failure ----------
 
-console.log(`Screens check: Chromium ${browser.version()}, ${PHONE.viewport.width}x${PHONE.viewport.height}, clock fixed at ${NOW.toISOString()}`);
+console.log(`Screens check: ${ENGINE} ${browser.version()}, ${PHONE.viewport.width}x${PHONE.viewport.height}, clock fixed at ${NOW.toISOString()}`);
 let failed = false;
 try {
   for (const s of steps) {
@@ -429,12 +433,12 @@ try {
       failed = true;
       const ms = Date.now() - t0;
       console.log(`FAIL ${s.name} (after ${ms} ms)\n  ${e.message.replace(/\n/g, '\n  ')}`);
-      if (process.env.GITHUB_ACTIONS) console.log(`::error title=Screens check::${s.name} failed after ${ms} ms: ${e.message.split('\n')[0]}`);
+      if (process.env.GITHUB_ACTIONS) console.log(`::error title=Screens check (${ENGINE})::${s.name} failed after ${ms} ms: ${e.message.split('\n')[0]}`);
       const screen = await page.evaluate(() => document.querySelector('main')?.innerText ?? '').catch(() => '');
       console.log(`  The screen showed:\n    ${screen.slice(0, 1500).replace(/\n+/g, '\n    ')}`);
       const dir = new URL('../../test-output/browser/', import.meta.url);
       mkdirSync(dir, { recursive: true });
-      await page.screenshot({ path: fileURLToPath(new URL('failure.png', dir)), fullPage: true }).catch(() => {});
+      await page.screenshot({ path: fileURLToPath(new URL(`failure-${ENGINE.toLowerCase()}.png`, dir)), fullPage: true }).catch(() => {});
       break;
     }
   }

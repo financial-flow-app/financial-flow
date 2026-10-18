@@ -1,7 +1,7 @@
 # Runs on every pull request and on main. A green check means every test passes:
 # no personal-data files, the build stamp is current, the engine matches Excel's recorded results,
 # exports keep the workbook intact, the page's security rules hold, and the screens work in a
-# phone-size browser (Chromium, the engine of Android's Chrome).
+# phone-size browser, on Chromium (the engine of Android's Chrome) and WebKit (the engine of every iPhone browser).
 name: Check
 
 on:
@@ -30,8 +30,16 @@ jobs:
 
       # Playwright is installed for this step only, at a pinned version (not a dependency of the app).
       # To update it, change the version here and in test/browser/screens.mjs.
-      - name: Screens on an emulated Android phone (Chromium)
+      - name: Install Playwright with Chromium and WebKit
         run: |
           npm install --no-save --no-package-lock playwright@1.63.0
-          npx playwright install --with-deps chromium
-          node test/browser/screens.mjs
+          npx playwright install --with-deps chromium webkit
+
+      - name: Screens on an emulated Android phone (Chromium)
+        run: node test/browser/screens.mjs
+
+      - name: Screens on an emulated iPhone (WebKit)
+        if: ${{ !cancelled() }}
+        run: node test/browser/screens.mjs
+        env:
+          BROWSER: webkit
