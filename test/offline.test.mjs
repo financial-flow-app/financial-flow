@@ -33,9 +33,12 @@ test('service worker: no silent updates, and only the app\'s own files', () => {
   assert.equal(skips.length, 1);
   assert.match(sw, /event\.data\?\.type === 'skipWaiting'\) self\.skipWaiting\(\)/);
   assert.ok(!/addEventListener\('install'[\s\S]*?skipWaiting[\s\S]*?\}\);/.test(sw.split("addEventListener('activate'")[0]), 'install must not skip waiting');
-  // fetch() only once, after the same-origin check, and no outside URLs at all.
-  assert.equal([...sw.matchAll(/\bfetch\(/g)].length, 1);
+  // fetch() twice: installing the app's own files (own(f), under ?v=BUILD), and after the same-origin check.
+  assert.equal([...sw.matchAll(/\bfetch\(/g)].length, 2);
+  assert.match(sw, /fetch\(new Request\(`\$\{own\(f\)\}\?v=\$\{BUILD\}`/);
   assert.match(sw, /url\.origin !== self\.location\.origin\) return;[\s\S]*fetch\(req\)/);
+  // An install keeps the files only if their fingerprint is BUILD, the same one scripts/stamp.mjs writes.
+  assert.match(sw, /if \(build !== BUILD\) throw/);
   assert.ok(!/https?:\/\//.test(sw), 'no outside URLs');
   for (const api of ['XMLHttpRequest', 'WebSocket', 'EventSource', 'sendBeacon', 'importScripts']) assert.ok(!sw.includes(api), api);
 });

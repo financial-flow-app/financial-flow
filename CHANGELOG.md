@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.1
+
+- Safer updates: a new version's files are fetched under its build number, so GitHub's cache can't hand back an older copy, and they're kept only if their fingerprint matches the build. An update can no longer store a mix of old and new files; if something doesn't match, the version already on the phone keeps working and the next visit tries again.
+- The browser check now cuts the network and reopens the app, and checks that it opens from the phone's copy with its data (on Chromium; Playwright's WebKit can't do this).
+
 ## 0.8.0
 
 - Add accounts, investments and income sources inside a month in the Ledger (+ Add account, + Add investment, + Add income source). A new account takes an unused row of Settings, starts at $0 and isn't required, so no past month changes. The ⋯ beside each one renames it (goals that track an account follow), closes it in that month ($0 that month, then marked closed) or ends an income source (its Until date).

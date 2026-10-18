@@ -3,8 +3,8 @@
 // - A new version installs in the background and then WAITS. It takes over only when the
 //   user taps "Update" (the page sends {type: 'skipWaiting'}), so code never changes silently.
 
-const VERSION = '0.8.0'; // same as src/version.js
-const BUILD = '03079ad122b1'; // fingerprint of FILES, written by scripts/stamp.mjs
+const VERSION = '0.8.1'; // same as src/version.js
+const BUILD = '4bb950f7e038'; // fingerprint of FILES, written by scripts/stamp.mjs
 const CACHE = `financial-flow-${VERSION}-${BUILD}`;
 const FILES = [
   './',
@@ -31,9 +31,35 @@ const FILES = [
 
 const own = (url) => new URL(url, self.registration.scope);
 
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+// An update must never keep a mix of old and new files (GitHub's CDN can hand out a file up to 10 minutes old).
+// So each file is fetched under its build (…?v=BUILD, which no cache has seen), and the set is kept only if its
+// fingerprint is BUILD: the same sha-256 that scripts/stamp.mjs writes. Otherwise the install fails, the version
+// already on the phone keeps working, and the next visit tries again.
 self.addEventListener('install', (event) => {
-  // cache: 'reload' skips the browser's HTTP cache, so the new version's files are the new ones.
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES.map((f) => new Request(own(f), { cache: 'reload' })))));
+  event.waitUntil((async () => {
+    // Each body is read as soon as it arrives: an unread response holds its connection open, and a browser
+    // keeps only a few open per server, so waiting for all of them first would never finish.
+    const got = new Map(await Promise.all(FILES.map(async (f) => {
+      const res = await fetch(new Request(`${own(f)}?v=${BUILD}`, { cache: 'reload' }));
+      if (!res.ok) throw new Error(`${f}: HTTP ${res.status}`);
+      return [f, { bytes: new Uint8Array(await res.arrayBuffer()), type: res.headers.get('content-type') }];
+    })));
+    const parts = [];
+    for (const f of FILES.filter((x) => x !== './').sort()) {
+      const { bytes } = got.get(f);
+      parts.push(enc.encode(f), f.endsWith('.png') ? bytes : enc.encode(dec.decode(bytes).replace(/\r\n/g, '\n')));
+    }
+    const all = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    parts.reduce((at, p) => { all.set(p, at); return at + p.length; }, 0);
+    const build = hex(await crypto.subtle.digest('SHA-256', all)).slice(0, 12);
+    if (build !== BUILD) throw new Error(`the files don't match build ${BUILD} (got ${build}); trying again next time`);
+    const cache = await caches.open(CACHE);
+    await Promise.all([...got].map(([f, { bytes, type }]) => cache.put(own(f), new Response(bytes, { headers: { 'content-type': type ?? '' } }))));
+  })());
 });
 
 self.addEventListener('activate', (event) => {

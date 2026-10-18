@@ -3,7 +3,7 @@
 // BROWSER=webkit. It uses the app the way a person would: import a synthetic workbook, read the
 // Dashboard, open the Ledger, Health checks and the Workbook page, fill a month, add a donation, reload,
 // export through the share sheet, read the shared file back with the app's own importer, reload again,
-// add and edit a goal, then add and close accounts and income sources in a month. It stops at the
+// add and edit a goal, add and close accounts and income sources in a month, and open it offline. It stops at the
 // first case that fails and says which one, after how long, and what the screen showed.
 //
 // The clock is fixed at Nov 10, 2026, noon UTC, so every run sees the same months and statuses.
@@ -482,6 +482,33 @@ step('Ledger: in October, add a card and a side job, close the emergency fund an
   await soon('the card is renamed', () => stored('data', 'accounts.3.name'), 'Card B (travel)');
   await soon('the chip counts what is waiting', chip, (c) => /^\d+ not exported$/.test(c ?? '') && c !== '1 not exported');
   await fitsPhone('October with the new accounts');
+});
+
+step('offline: with no network, the app opens from the phone\'s copy, with its data', async () => {
+  // Playwright's WebKit build can't load a page offline through a service worker ("internal error"),
+  // although iPhones can; this case runs on Chromium (the engine of Android's Chrome).
+  if (ENGINE === 'WebKit') { console.log('  (runs on Chromium only)'); return; }
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await soon('the offline copy is installed and in charge of the page', async () => {
+    if (!await page.evaluate(() => !!navigator.serviceWorker.controller)) await page.reload();
+    return page.evaluate(() => !!navigator.serviceWorker.controller);
+  }, true);
+  await context.setOffline(true);
+  try {
+    const res = await page.reload();
+    // The test server forbids caching, so without the offline copy there would be nothing to show.
+    if (ENGINE === 'Chromium') assert.equal(res.fromServiceWorker(), true, 'the page came from the offline copy');
+    await tab('dashboard');
+    await soon('the Dashboard shows the workbook, offline', () => page.isVisible('.tiles'), true);
+    await openMonth('October 2026');
+    await soon('October\'s entries are there, offline', () => value('#f-balances-0'), '10,000');
+    const fresh = await context.newPage(); // like opening the app from its icon
+    await fresh.goto(base);
+    await soon('a new window opens offline too', () => fresh.evaluate(() => document.querySelector('.top h1')?.textContent ?? null), 'Financial Flow');
+    await fresh.close();
+  } finally {
+    await context.setOffline(false);
+  }
 });
 
 // ---------- run them, in order, stopping at the first failure ----------
