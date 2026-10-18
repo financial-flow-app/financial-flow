@@ -4,7 +4,7 @@
 //   user taps "Update" (the page sends {type: 'skipWaiting'}), so code never changes silently.
 
 const VERSION = '0.7.0'; // same as src/version.js
-const BUILD = '9379dd0e00d6'; // fingerprint of FILES, written by scripts/stamp.mjs
+const BUILD = 'c6bfb8c645ad'; // fingerprint of FILES, written by scripts/stamp.mjs
 const CACHE = `financial-flow-${VERSION}-${BUILD}`;
 const FILES = [
   './',
