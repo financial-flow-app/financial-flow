@@ -26,6 +26,13 @@ export const GIVING_FIRST_ROW = 7;
 export const GIVING_LAST_ROW = 2006;
 export const GIVING_COLS = { date: 'A', amount: 'B', recipient: 'C', paidFrom: 'D', household: 'E', note: 'F', deductible: 'G' };
 
+// Settings goal rows: 69-88 (20 slots), columns A-G.
+export const GOAL_FIRST_ROW = 69;
+export const GOAL_SLOTS = 20;
+export const GOAL_COLS = { name: 'A', type: 'B', target: 'C', basedOn: 'D', currentFrom: 'E', account: 'F', targetDate: 'G' };
+// The same list as the workbook's validation on B69:B88.
+export const GOAL_TYPES = ['Fixed Amount', 'Percentage', 'Multiple', 'Annual Contribution', 'Pay Down To', 'Save By Date', 'Tithe Balance'];
+
 function range(a, b) {
   return Array.from({ length: b - a + 1 }, (_, i) => a + i);
 }
@@ -116,6 +123,30 @@ export function givingEdits(rows, { tax = false } = {}) {
     edits.set(`B${r}`, g.amount ?? null);
     for (const k of ['recipient', 'paidFrom', 'household', 'note', ...(tax ? ['deductible'] : [])]) {
       edits.set(`${GIVING_COLS[k]}${r}`, g[k] ? String(g[k]) : null);
+    }
+  }
+  return edits;
+}
+
+/**
+ * Settings goal edits. goals: [{slot, name, type, target, basedOn, currentFrom, account, targetDate}]
+ * (slot 0-19). targetDate is "YYYY-MM-DD" or an Excel serial. Missing or null fields become blank cells;
+ * a goal with only {slot} clears the row (a blank name is an unused slot).
+ */
+export function goalEdits(goals) {
+  const edits = new Map();
+  for (const g of goals) {
+    if (!(Number.isInteger(g.slot) && g.slot >= 0 && g.slot < GOAL_SLOTS)) throw new Error(`Goal slot ${g.slot} is outside the list.`);
+    const r = GOAL_FIRST_ROW + g.slot;
+    for (const [k, col] of Object.entries(GOAL_COLS)) {
+      const v = g[k] ?? null;
+      const ref = `${col}${r}`;
+      if (v === null || v === '') edits.set(ref, null);
+      else if (k === 'targetDate') edits.set(ref, typeof v === 'number' ? v : dateSerial(v));
+      else if (k === 'target') {
+        if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`${ref}: a number is expected.`);
+        edits.set(ref, v);
+      } else edits.set(ref, typeof v === 'number' ? v : String(v)); // a name Excel holds as a number stays a number
     }
   }
   return edits;

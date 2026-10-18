@@ -10,6 +10,7 @@ and the app exports the same workbook with your entries written in. If the app e
 
 - **Dashboard:** net worth and its change, liquid cash, investments, amounts owed, money flow,
   tithe balance for the quarter, tax lines for the year, goals, accounts and health checks.
+  Goals can be added, changed and deleted there; they go into the workbook's Settings on export.
 - **Month:** month-end balances, income, family-paid and one-time costs, investments and a note.
   Automatic values show in grey; type to override, or clear to go back to automatic.
 - **Giving:** add, edit and delete donations.

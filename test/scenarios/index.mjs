@@ -261,3 +261,17 @@ SCENARIOS.push({
   about: 'As tithe-quarters-no-carry, but extra giving carries forward.',
 });
 SCENARIOS.at(-1).settings = { ...SCENARIOS.at(-1).settings, B9: 'Yes' };
+
+// The goals scenario with goals edited through the app (spec section 11): the app's own export
+// writes them into Settings, and Excel must compute the same goal results from what it wrote.
+SCENARIOS.push({
+  ...SCENARIOS.find((s) => s.name === 'goals'),
+  name: 'goals-edited',
+  about: 'As goals, then edited in the app: one added, two changed (one to another type), one deleted.',
+  edit: (data, entry) => {
+    entry.addGoal(data, { name: 'Checking cushion', type: 'Save By Date', target: 12000, currentFrom: 'Specific Account', account: 'Checking A', targetDate: d('2027-01-31') });
+    entry.updateGoal(data, 1, { ...data.goals[1], target: 30, basedOn: 'Average Monthly Income' });
+    entry.updateGoal(data, 2, { ...data.goals[2], type: 'Fixed Amount', target: 9000 });
+    entry.deleteGoal(data, 4);
+  },
+});

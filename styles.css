@@ -188,3 +188,5 @@ textarea { width: 100%; min-height: 72px; padding: 8px 10px; border: 1px solid v
   .tabs button { min-height: 44px; }
   body { padding-bottom: calc(52px + env(safe-area-inset-bottom)); }
 }
+.goal-head .count { margin-left: auto; }
+.link-btn { min-height: var(--tap); margin: -12px -8px -12px 0; padding: 0 8px; border: 0; background: none; color: var(--accent); font-weight: 600; }

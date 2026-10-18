@@ -3,7 +3,10 @@
 // the user's entries into workbook edits for export.
 
 import { isBlank, N, is, DATE, YEAR, MONTH, DAYOF } from './excel.js';
-import { MONTH_END_ROWS, AUTO, SHEET, monthEndEdits, givingEdits, GIVING_FIRST_ROW, GIVING_LAST_ROW } from './ffos.js';
+import {
+  MONTH_END_ROWS, AUTO, SHEET, monthEndEdits, givingEdits, goalEdits, GIVING_FIRST_ROW, GIVING_LAST_ROW, GOAL_COLS, GOAL_TYPES,
+} from './ffos.js';
+import { METRIC_NAMES } from './calc.js';
 
 const LIMIT = 1e9; // the workbook's own validation: a number between -1,000,000,000 and 1,000,000,000
 
@@ -88,20 +91,93 @@ function cleanGift(g, tax) {
   };
 }
 
+// ---------- Goals (Settings rows 69-88) ----------
+
+const GOAL_FIELDS = Object.keys(GOAL_COLS);
+const SPECIFIC = 'Specific Account';
+
+/** Which fields a goal type uses. Tithe Balance takes its target and current value from this quarter's tithe. */
+export function goalNeeds(type) {
+  const t = String(type ?? '').toLowerCase();
+  const tithe = t === 'tithe balance';
+  return {
+    target: !tithe,
+    basedOn: t === 'percentage' || t === 'multiple',
+    currentFrom: !tithe,
+    targetDate: t === 'save by date',
+  };
+}
+
+/** The choices the goal form offers, all from the workbook: types, metrics and the named accounts. */
+export function goalChoices(data) {
+  const accounts = [...data.accounts, ...data.investments].map((a) => a.name).filter((n) => !isBlank(n)).map(String);
+  return { types: GOAL_TYPES, metrics: METRIC_NAMES, accounts };
+}
+
+/** A goal as the form saves it: fields its type doesn't use are blank; the account only with Specific Account. */
+export function cleanGoal(g) {
+  const text = (v) => (isBlank(v) || String(v).trim() === '' ? null : typeof v === 'number' ? v : String(v).trim());
+  const need = goalNeeds(g.type);
+  const basedOn = need.basedOn ? text(g.basedOn) : null;
+  const currentFrom = need.currentFrom ? text(g.currentFrom) : null;
+  const usesAccount = is(basedOn, SPECIFIC) || is(currentFrom, SPECIFIC);
+  return {
+    name: text(g.name),
+    type: text(g.type),
+    target: need.target && typeof g.target === 'number' ? g.target : null,
+    basedOn,
+    currentFrom,
+    account: usesAccount ? text(g.account) : null,
+    targetDate: need.targetDate && typeof g.targetDate === 'number' ? g.targetDate : null,
+  };
+}
+
+/** What's missing before a goal can be saved, or null. A Save By Date goal may leave its date blank. */
+export function goalProblem(g) {
+  const need = goalNeeds(g.type);
+  if (isBlank(g.name) || String(g.name).trim() === '') return 'Give the goal a name.';
+  if (isBlank(g.type)) return 'Pick a type.';
+  if (need.target && typeof g.target !== 'number') return 'Enter the target.';
+  if (need.basedOn && isBlank(g.basedOn)) return 'Pick what the target is based on.';
+  if (need.currentFrom && isBlank(g.currentFrom)) return 'Pick where the current value comes from.';
+  if ((is(g.basedOn, SPECIFIC) && need.basedOn) || (is(g.currentFrom, SPECIFIC) && need.currentFrom)) {
+    if (isBlank(g.account)) return 'Pick the account.';
+  }
+  return null;
+}
+
+/** Add a goal in the first slot with a blank name. Returns the slot, or null when all 20 are used. */
+export function addGoal(data, goal) {
+  const slot = data.goals.findIndex((g) => isBlank(g.name));
+  if (slot < 0) return null;
+  data.goals[slot] = cleanGoal(goal);
+  return slot;
+}
+
+export function updateGoal(data, slot, goal) {
+  data.goals[slot] = cleanGoal(goal);
+}
+
+/** Clear the goal's row (a blank name means an unused slot). */
+export function deleteGoal(data, slot) {
+  data.goals[slot] = Object.fromEntries(GOAL_FIELDS.map((k) => [k, null]));
+}
+
 // ---------- Changes and export ----------
 
 /** Workbook edits that turn `base` (as imported) into `current`. */
 export function workbookEdits(base, current) {
-  const { me, gv } = differences(base, current);
+  const { me, gv, gl } = differences(base, current);
   return new Map([
     [SHEET.monthEnd, monthEndEdits(me)],
     [SHEET.giving, givingEdits(gv, { tax: current.hasTax })],
+    [SHEET.settings, goalEdits(gl)],
   ]);
 }
 
 /**
- * What differs between two copies of the data: Month-End fields (one per field, with its month)
- * and Giving rows (one per donation added, changed or removed).
+ * What differs between two copies of the data: Month-End fields (one per field, with its month),
+ * Giving rows (one per donation added, changed or removed) and goals (one per goal slot changed).
  */
 function differences(base, current) {
   const me = [];
@@ -125,13 +201,21 @@ function differences(base, current) {
     gv.push(c ?? { row });
   }
   gv.sort((x, y) => x.row - y.row);
-  return { me, gv };
+  const gl = [];
+  current.goals.forEach((g, slot) => {
+    const b = base.goals[slot];
+    if (!GOAL_FIELDS.every((f) => (g[f] ?? null) === (b?.[f] ?? null))) gl.push({ ...g, slot });
+  });
+  return { me, gv, gl };
 }
 
-/** Things done since `base`: each Month-End field typed or cleared counts 1, each donation added, changed or deleted counts 1. */
+/** Things done since `base`: each Month-End field typed or cleared, each donation and each goal added, changed or deleted counts 1. */
 export function changeSummary(base, current) {
-  const { me, gv } = differences(base, current);
-  return { fields: me.length, gifts: gv.length, total: me.length + gv.length, months: [...new Set(me.map((x) => x.month))] };
+  const { me, gv, gl } = differences(base, current);
+  return {
+    fields: me.length, gifts: gv.length, goals: gl.length, total: me.length + gv.length + gl.length,
+    months: [...new Set(me.map((x) => x.month))],
+  };
 }
 
 export const changeCount = (base, current) => changeSummary(base, current).total;
@@ -177,7 +261,7 @@ export function olderCopyCheck({ exported, exportedAt }, incoming) {
   const stamp = incoming.exportStamp ?? null;
   if (stamp && stamp >= exportedAt) return { warn: false, stamp };
   const diff = changeSummary(incoming, exported);
-  return { warn: diff.total > 0, stamp, missing: diff.total, months: diff.months, gifts: diff.gifts };
+  return { warn: diff.total > 0, stamp, missing: diff.total, months: diff.months, gifts: diff.gifts, goals: diff.goals };
 }
 
 // ---------- Which month, and what the screen shows ----------
