@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0
+
+- Add accounts, investments and income sources inside a month in the Ledger (+ Add account, + Add investment, + Add income source). A new account takes an unused row of Settings, starts at $0 and isn't required, so no past month changes. The ⋯ beside each one renames it (goals that track an account follow), closes it in that month ($0 that month, then marked closed) or ends an income source (its Until date).
+- The Ledger tab replaces Month and History: the month to fill next, this year's totals, the average month and every month (tap one to fill or fix it).
+- No menu: Health checks open from the Dashboard's warning line, and the Workbook page (export, import, the app's version) from the chip in the top bar, which is always shown. The red dot is gone.
+
 ## 0.7.0
 
 - Each tab has one job. Along the bottom: Dashboard, Month, Giving and Goals. At the top, ☰ More holds History, Import & export (was the File tab), Health checks and About.

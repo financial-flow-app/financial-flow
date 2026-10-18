@@ -10,12 +10,12 @@ and the app exports the same workbook with your entries written in. If the app e
 
 - **Dashboard:** one screen: what needs attention, net worth and its change, liquid cash, amounts owed,
   investments, tithe balance for the quarter, goals at a glance and accounts.
-- **Month:** month-end balances, income, family-paid and one-time costs, investments and a note.
-  Automatic values show in grey; type to override, or clear to go back to automatic.
+- **Ledger:** every month and this year's totals; the month-end update (balances, income, costs, investments,
+  a note; automatic values show in grey); adding, renaming and closing accounts, investments and income sources.
 - **Giving:** add, edit and delete donations; the tithe balance and tax-deductible giving.
 - **Goals:** every goal's progress; add, change and delete them (they go into the workbook's Settings on export).
-- **☰ More:** History (every month and this year's totals), Import & export (through the phone's share sheet,
-  for example to a PC), Health checks and About.
+- **Workbook** (the chip in the top bar): import a workbook; export it through the phone's share sheet (for example
+  to a PC). Health checks open from the Dashboard's warning line.
 
 It reads workbooks in the FFOS 4.0 format (a specific layout with Settings, Month-End, Giving, History
 and Calc sheets). Every number on the Dashboard is calculated exactly as the workbook calculates it.

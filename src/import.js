@@ -7,17 +7,10 @@ import { makeRef, numToCol } from './cellref.js';
 import { is } from './excel.js';
 import {
   SHEET, FIRST_COL, MONTH_COUNT, FIRST_MONTH, MONTH_END_ROWS, GIVING_FIRST_ROW, GIVING_LAST_ROW,
-  automaticFormula, dateSerial,
+  automaticFormula, dateSerial, LAYOUT,
 } from './ffos.js';
 
-export const LAYOUT = {
-  accounts: { first: 19, count: 14, cols: ['name', 'type', 'opening', 'estimate', 'active', 'required', 'notes'] },
-  investments: { first: 36, count: 6, cols: ['name', 'type', 'opening', 'contributed', 'contributedThisYear', 'estimate', 'active', 'notes'] },
-  // Columns I-J (sources) and H (recurring) exist from FFOS 3.8 on (the tax option); blank before.
-  sources: { first: 45, count: 12, cols: ['name', 'tithe', 'usual', 'frequency', 'day', 'from', 'until', 'notes', 'taxable', 'withheld'] },
-  recurring: { first: 60, count: 6, cols: ['name', 'amount', 'day', 'from', 'until', 'household', 'notes', 'deductible'] },
-  goals: { first: 69, count: 20, cols: ['name', 'type', 'target', 'basedOn', 'currentFrom', 'account', 'targetDate'] },
-};
+export { LAYOUT }; // the Settings tables, defined in ffos.js
 
 const SETTINGS_CELLS = {
   openingDate: 'B5', titheStart: 'B6', titheRate: 'B7', openingTithe: 'B8', carryExtra: 'B9',

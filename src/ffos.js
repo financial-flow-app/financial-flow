@@ -1,6 +1,6 @@
 // FFOS workbook layout (version 3.6): which cells are inputs, and how to edit them.
 
-import { makeRef, parseRef, formulaRefs, rewriteRefs } from './cellref.js';
+import { makeRef, parseRef, formulaRefs, rewriteRefs, numToCol } from './cellref.js';
 import { FORMULA_MAP } from './formula-map.js';
 
 export const SHEET = { monthEnd: 'Month-End', giving: 'Giving', settings: 'Settings' };
@@ -25,6 +25,16 @@ export const MONTH_END_INPUT_ROWS = Object.values(MONTH_END_ROWS).flat();
 export const GIVING_FIRST_ROW = 7;
 export const GIVING_LAST_ROW = 2006;
 export const GIVING_COLS = { date: 'A', amount: 'B', recipient: 'C', paidFrom: 'D', household: 'E', note: 'F', deductible: 'G' };
+
+// Settings: the tables of rows (one row per slot, a blank name = an unused slot), column A onwards.
+export const LAYOUT = {
+  accounts: { first: 19, count: 14, cols: ['name', 'type', 'opening', 'estimate', 'active', 'required', 'notes'] },
+  investments: { first: 36, count: 6, cols: ['name', 'type', 'opening', 'contributed', 'contributedThisYear', 'estimate', 'active', 'notes'] },
+  // Columns I-J (sources) and H (recurring) exist from FFOS 3.8 on (the tax option); blank before.
+  sources: { first: 45, count: 12, cols: ['name', 'tithe', 'usual', 'frequency', 'day', 'from', 'until', 'notes', 'taxable', 'withheld'] },
+  recurring: { first: 60, count: 6, cols: ['name', 'amount', 'day', 'from', 'until', 'household', 'notes', 'deductible'] },
+  goals: { first: 69, count: 20, cols: ['name', 'type', 'target', 'basedOn', 'currentFrom', 'account', 'targetDate'] },
+};
 
 // Settings goal rows: 69-88 (20 slots), columns A-G.
 export const GOAL_FIRST_ROW = 69;
@@ -151,3 +161,26 @@ export function goalEdits(goals) {
   }
   return edits;
 }
+
+/**
+ * Settings edits for the account, investment and income-source tables: only the cells that changed.
+ * changes: [{table: 'accounts' | 'investments' | 'sources', slot, field, value}]; value is a number,
+ * a string or null (blank). Dates (an income source's from and until) are Excel serials.
+ */
+export function settingsEdits(changes) {
+  const edits = new Map();
+  for (const { table, slot, field, value } of changes) {
+    const t = LAYOUT[table];
+    const col = t?.cols.indexOf(field);
+    if (!t || !['accounts', 'investments', 'sources'].includes(table) || col < 0) throw new Error(`Settings: ${table}.${field} is not editable.`);
+    if (!(Number.isInteger(slot) && slot >= 0 && slot < t.count)) throw new Error(`Settings: ${table} slot ${slot} is outside the table.`);
+    const ref = `${numToCol(col + 1)}${t.first + slot}`;
+    if (value === null || value === undefined || value === '') edits.set(ref, null);
+    else if (typeof value === 'number') {
+      if (!Number.isFinite(value)) throw new Error(`${ref}: a number is expected.`);
+      edits.set(ref, value);
+    } else edits.set(ref, String(value));
+  }
+  return edits;
+}
+
