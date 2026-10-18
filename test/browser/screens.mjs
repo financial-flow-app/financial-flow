@@ -1,7 +1,7 @@
 // The screens in a real browser: Chromium at phone size (375 x 812), on the local test server.
 // It uses the app the way a person would: import a synthetic workbook, read the Dashboard, fill a
 // month, add a donation, reload, export through the share sheet, read the shared file back with
-// the app's own importer, reload again, then add and edit a goal. It stops at the first case that fails and says which
+// the app's own importer, reload again, then add and edit a goal and visit the More pages. It stops at the first case that fails and says which
 // one, after how long, and what the screen showed.
 //
 // The clock is fixed at Nov 10, 2026, noon UTC, so every run sees the same months and statuses.
@@ -151,6 +151,12 @@ const stored = (key, path = '') => page.evaluate(([key, path]) => new Promise((r
 }), [key, path]);
 
 const tab = (name) => page.click(`.tabs button[data-tab="${name}"]`);
+/** Open a page under ☰ More ("Import & export", "History", ...). */
+async function more(label) {
+  await page.click('#more-btn');
+  await page.locator('.menu-item', { hasText: label }).click();
+  await soon(`More → ${label} opens`, () => text('.sub-head h2'), label);
+}
 async function fitsPhone(screen) {
   const width = await page.evaluate(() => document.documentElement.scrollWidth);
   assert.ok(width <= PHONE.viewport.width, `${screen} is ${width}px wide, so the phone would scroll sideways`);
@@ -186,23 +192,61 @@ step(`imports a synthetic workbook ("${SCENARIO}") and opens the month to fill`,
   await fitsPhone('the Month screen');
 });
 
-step('Dashboard: the as-of line and the tiles show the workbook\'s numbers', async () => {
+step('Dashboard: one screen answers "are we OK, and does anything need me?"', async () => {
   const v = dashboardView(calculate(structuredClone(before), TODAY), before, TODAY);
   assert.equal(v.asOfText, 'September 30, 2026');
   await tab('dashboard');
-  await soon('the as-of line', () => text('.as-of p'), 'As of September 30, 2026');
-  assert.equal(await text('.as-of button'), 'Fill October 2026 →');
+  await soon('the as-of line', () => text('.as-of p'), 'As of Sep 30, 2026');
+  assert.equal(await text('.as-of button'), 'Fill Oct 2026 →');
   const tiles = await page.evaluate(() => [...document.querySelectorAll('.tile')].map((t) =>
     [t.querySelector('.tile-label').textContent, t.querySelector('.tile-value').textContent]));
   assert.deepEqual(tiles, [
-    ['Net worth', whole(v.tiles.netWorth.value)],
+    ['Net worth ›', whole(v.tiles.netWorth.value)],
     ['Liquid cash', whole(v.tiles.liquid.value)],
-    ['Investments + retirement', whole(v.tiles.investments.value)],
-    ['Owed on cards & loans', whole(v.tiles.owed.value)],
+    ['Owed', whole(v.tiles.owed.value)],
+    ['Investments', whole(v.tiles.investments.value)],
   ]);
   assert.ok(tiles.every(([, x]) => /^-?\$[\d,]+$/.test(x)), `every tile shows an amount: ${JSON.stringify(tiles)}`);
-  assert.equal(await fact('Tax-deductible giving'), whole(v.tax.deductible));
+  // The most urgent health check, with "+N more".
+  const warn = v.health.filter((x) => !x.startsWith('✓'));
+  assert.ok(warn.length > 1, 'the scenario has more than one health line that needs attention');
+  assert.equal(await text('#attention'), `${warn.find((x) => x.startsWith('⚠'))}+${warn.length - 1} more ›`);
+  assert.equal(await text('#tithe .row'), `Tithe this quarter${whole(v.tithe.balance)} owed ›`);
+  assert.equal(await text('#goals-line'), 'Goals⚠ 1 off track · 8 on the way ›');
+  const accounts = await page.evaluate(() => [...document.querySelectorAll('#accounts dt')].map((dt) => dt.firstChild.textContent));
+  assert.deepEqual(accounts, v.accounts.map((a) => a.name));
+  // In this order, and all of it above the tabs without scrolling.
+  const order = await page.evaluate(() => [...document.querySelector('main .dashboard').children].map((el) => el.id || el.className.split(' ').at(-1)));
+  assert.deepEqual(order, ['as-of', 'attention', 'tiles', 'tithe', 'goals-line', 'accounts']);
+  const room = await page.evaluate(() => ({ bottom: document.getElementById('accounts').getBoundingClientRect().bottom, top: document.querySelector('.tabs').getBoundingClientRect().top }));
+  assert.ok(room.bottom <= room.top + 1, `the Dashboard should end above the tabs: it ends at ${room.bottom}px, the tabs start at ${room.top}px`);
   await fitsPhone('the Dashboard');
+});
+
+step('Net worth opens History; the phone\'s Back button returns to the More menu', async () => {
+  const v = dashboardView(calculate(structuredClone(before), TODAY), before, TODAY);
+  await page.click('.tile:has-text("Net worth")');
+  await soon('History opens', () => text('.sub-head h2'), 'History');
+  assert.equal(await text('#h-year h2'), 'This year (2026)');
+  assert.equal(await fact('Income'), whole(v.flow.rows[0][3]), 'this year\'s income');
+  assert.equal(await text('#h-avg h2'), 'Average month (last 3 full)');
+  const months = await page.evaluate(() => [...document.querySelectorAll('#h-months .month-name')].map((n) => n.textContent));
+  assert.equal(months[0], 'November 2026', 'newest first (the current month, in progress)');
+  assert.equal(months.at(-1), 'April 2026 ✓', 'back to the first month after the opening date');
+  assert.equal(months.length, 8);
+  await fitsPhone('History');
+  await page.goBack();
+  await soon('Back returns to the More menu', () => page.evaluate(() => [...document.querySelectorAll('.menu-title')].map((t) => t.firstChild.textContent)),
+    ['History', 'Import & export', 'Health checks', 'About']);
+  await page.locator('.menu-item', { hasText: 'Health checks' }).click();
+  await soon('Health checks lists what needs attention, then what is fine',
+    () => page.evaluate(() => [...document.querySelectorAll('main .checks li')].map((li) => li.textContent)),
+    [...v.health.filter((x) => !x.startsWith('✓')), ...v.health.filter((x) => x.startsWith('✓'))]);
+  await page.click('.back-btn');
+  await page.locator('.menu-item', { hasText: 'About' }).click();
+  await soon('About shows the version', () => fact('Version'), (x) => /^\d+\.\d+\.\d+/.test(x ?? ''));
+  await fitsPhone('About');
+  await tab('dashboard');
 });
 
 step('Month: a required balance changes the status, and × clears it', async () => {
@@ -260,8 +304,7 @@ step('Giving: a tax-deductible donation is added and listed', async () => {
   assert.equal(await value('#g-amount'), '', 'the form is empty again for the next donation');
   assert.equal(await chip(), '3 not exported');
   await fitsPhone('the Giving screen');
-  await tab('dashboard');
-  await soon('the Dashboard counts it as tax-deductible giving', () => fact('Tax-deductible giving'), '$123');
+  await soon('Giving counts it as tax-deductible giving', () => fact('Tax-deductible giving this year'), '$123');
 });
 
 step('reload: the entries stay on the phone (IndexedDB), still waiting to be exported', async () => {
@@ -277,10 +320,11 @@ step('reload: the entries stay on the phone (IndexedDB), still waiting to be exp
 });
 
 let shared;
-step('File: export sends the workbook to the share sheet', async () => {
-  await tab('file');
-  await soon('File shows what is not exported', () => fact('Not exported'), '3 entries');
-  await fitsPhone('the File screen');
+step('Import & export: export sends the workbook to the share sheet', async () => {
+  await soon('the More button shows no export-due dot (the last export was today)', () => page.isHidden('#more-dot'), true);
+  await more('Import & export');
+  await soon('Import & export shows what is not exported', () => fact('Not exported'), '3 entries');
+  await fitsPhone('the Import & export screen');
   await page.getByRole('button', { name: 'Export workbook' }).click();
   await soon('one file reaches the share sheet', () => page.evaluate(() => window.__shared.length), 1);
   shared = await page.evaluate(() => window.__shared[0]);
@@ -315,7 +359,7 @@ step('the shared file, read back with src/import.js, holds exactly the entries m
 
 step('reload after the export: the export is remembered and the entries stay', async () => {
   await page.reload();
-  await tab('file');
+  await more('Import & export');
   await soon('the stamp of the export shows', () => fact('Stamp in file'), 'exported Nov 10, 2026, 12:00 PM');
   assert.equal(await fact('Not exported'), '✓ nothing');
   assert.equal(await fact('Workbook'), shared.name);
@@ -324,10 +368,10 @@ step('reload after the export: the export is remembered and the entries stay', a
   await soon('the balance is still there', () => value('#f-balances-0'), '10,000');
 });
 
-step('Goals: add one on the Dashboard; the form asks only what the type needs', async () => {
-  await tab('dashboard');
+step('Goals: add one on the Goals tab; the form asks only what the type needs', async () => {
+  await tab('goals');
   const names = () => page.evaluate(() => [...document.querySelectorAll('#goals .goal-name')].map((n) => n.textContent));
-  await soon('the Dashboard lists the workbook\'s goals', async () => (await names()).length, before.goals.filter((g) => g.name).length);
+  await soon('the Goals tab lists the workbook\'s goals', async () => (await names()).length, before.goals.filter((g) => g.name).length);
   await page.getByRole('button', { name: 'Add goal' }).click();
   await soon('the goal form opens', () => text('#goal-form h2'), 'Add a goal');
   const shown = () => page.evaluate(() => ['goal-target', 'goal-based', 'goal-current', 'goal-account', 'goal-date']
@@ -367,7 +411,7 @@ step('Goals: Edit changes the type, and fields it no longer uses are cleared', a
   await soon('the card shows it with this quarter\'s tithe', () => page.evaluate(() => [...document.querySelectorAll('#goals .goal .help')].at(-1)?.textContent ?? null),
     (t) => t?.endsWith('This quarter'));
   assert.equal(await chip(), '1 not exported', 'one goal changed since the export');
-  await fitsPhone('the Dashboard with the new goal');
+  await fitsPhone('the Goals tab with the new goal');
 });
 
 // ---------- run them, in order, stopping at the first failure ----------

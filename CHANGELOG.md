@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0
+
+- Each tab has one job. Along the bottom: Dashboard, Month, Giving and Goals. At the top, ☰ More holds History, Import & export (was the File tab), Health checks and About.
+- The Dashboard fits one phone screen: the most urgent health check with "+N more", net worth, liquid cash, owed, investments, tithe this quarter, a goals line and the accounts. Net worth opens History; tithe opens Giving; the goals line opens Goals.
+- Goals has its own tab. History shows this year's totals, the average month and every month since the opening date. Giving shows the tithe balance and this year's tax-deductible giving at the top.
+- The More button shows a red dot when an export is due; the phone's Back button returns from a page under More to its menu.
+
 ## 0.6.0
 
 - Goals can be added, changed and deleted on the Dashboard. The form asks only for what the goal's type needs, with choices from your workbook. Export writes them into the goal rows of Settings, and nothing else there; other settings are still changed in Excel.
