@@ -1,4 +1,5 @@
-// The screens: Month (monthly entry), Giving (donation log) and File (import / export).
+// The screens: Dashboard, Month (monthly entry), Giving (donation log), Goals, and More (History, Import & export,
+// Health checks, About).
 // The DOM is built with createElement only (no HTML strings), so nothing typed can run as code.
 
 import { importWorkbook, WorkbookError } from './import.js';
@@ -25,7 +26,7 @@ const when = (ms) => (ms ? dayFmt.format(new Date(ms)) : 'never');
 const state = {
   original: null, base: null, data: null, fileName: null, importedAt: null, lastExport: null,
   exported: null, exportedAt: null, // what this phone last exported, for the older-copy check
-  out: null, today: todaySerial(), tab: 'dashboard', month: 0, gift: null, goal: null /* null, 'new' or a slot */, persisted: false, message: null,
+  out: null, today: todaySerial(), tab: 'dashboard' /* dashboard, month, giving, goals or more */, month: 0, gift: null, goal: null /* null, 'new' or a slot */, more: null /* the page open under More, or null for its menu */, persisted: false, message: null,
   // App updates and install (see setupServiceWorker)
   waiting: null, waitingVersion: null, updating: false, installPrompt: null,
   installed: matchMedia('(display-mode: standalone)').matches,
@@ -137,7 +138,7 @@ async function doUpdate() {
 addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault(); // show our own "Install app" button instead of the browser's banner
   state.installPrompt = e;
-  if (state.tab === 'file') render();
+  if (state.tab === 'more') render();
 });
 addEventListener('appinstalled', async () => {
   state.installPrompt = null;
@@ -242,11 +243,16 @@ function render() {
     if (b.dataset.tab === state.tab) b.setAttribute('aria-current', 'page');
     else b.removeAttribute('aria-current');
   }
+  const moreBtn = document.getElementById('more-btn');
+  if (state.tab === 'more') moreBtn.setAttribute('aria-current', 'page');
+  else moreBtn.removeAttribute('aria-current');
+  document.getElementById('more-dot').hidden = !(state.data && reminder().due);
   const main = document.getElementById('main');
-  const screen = !state.data && state.tab !== 'file' ? noDataScreen()
+  const screen = state.tab === 'more' ? moreScreen()
+    : !state.data ? noDataScreen()
     : state.tab === 'dashboard' ? dashboardScreen()
     : state.tab === 'giving' ? givingScreen()
-    : state.tab === 'file' ? fileScreen()
+    : state.tab === 'goals' ? goalsScreen()
     : monthScreen();
   const banners = [];
   if (state.waiting) {
@@ -452,92 +458,104 @@ function goalLine(g) {
   return [...parts, g.note].filter(Boolean).join(' · ');
 }
 
+// The Dashboard answers one question: are we OK, and does anything need me? Everything on it fits one phone screen.
 function dashboardScreen() {
   const v = dashboardView(state.out, state.data, state.today);
   const t = v.tiles;
-  const tile = (label, x, extraClass = '') =>
-    h('div', { class: `tile ${extraClass}` }, h('span', { class: 'tile-label' }, label), h('span', { class: 'tile-value' }, whole(x.value)),
-      x.line ? h('span', { class: `tile-line ${x.tone ? `tone-text-${x.tone}` : ''}` }, x.line) : null);
+  const tile = (label, x, onclick = null) => {
+    const kids = [h('span', { class: 'tile-label' }, label, onclick ? h('span', { class: 'go', 'aria-hidden': 'true' }, ' ›') : null),
+      h('span', { class: 'tile-value' }, whole(x.value)),
+      x.line ? h('span', { class: `tile-line ${x.tone ? `tone-text-${x.tone}` : ''}` }, x.line) : null];
+    return onclick ? h('button', { type: 'button', class: 'tile', onclick }, kids) : h('div', { class: 'tile' }, kids);
+  };
   const goTo = (i) => { state.month = i; state.tab = 'month'; render(); scrollTo(0, 0); };
+  const go = () => h('span', { class: 'go', 'aria-hidden': 'true' }, '›');
 
+  // One row: "As of Sep 30, 2026" and "Fill Oct 2026 →" (the full date and month are in the title).
+  const short = (label) => label.replace(/^(\w{3})\w*/, '$1');
   const head = h('section', { class: 'card as-of' },
-    h('p', {}, `As of ${v.asOfText}`),
+    h('p', { title: `As of ${v.asOfText}` }, `As of ${short(v.asOfText)}`),
     v.next.index >= 0 && v.next.index <= entry.currentMonthIndex(state.out.months, state.today)
-      ? h('button', { type: 'button', class: 'btn primary', onclick: () => goTo(v.next.index) }, `Fill ${v.next.label} →`)
+      ? h('button', { type: 'button', class: 'btn primary', title: `Fill ${v.next.label}`, onclick: () => goTo(v.next.index) }, `Fill ${short(v.next.label)} →`)
       : null);
 
   const rem = reminder();
   const remind = rem.due ? h('div', { class: 'banner tone-bad', role: 'status' },
     h('span', {}, `⚠ ${rem.text}. Export so Excel has your ${changes()} new ${changes() === 1 ? 'entry' : 'entries'}.`),
-    h('button', { type: 'button', class: 'btn', onclick: () => { state.tab = 'file'; render(); } }, 'Export')) : null;
+    h('button', { type: 'button', class: 'btn', onclick: () => openMore('file') }, 'Export')) : null;
+
+  // The most urgent health check, with "+N more"; all of them are under More → Health checks.
+  const warn = v.health.filter((x) => !x.startsWith('✓'));
+  const first = warn.find((x) => x.startsWith('⚠')) ?? warn[0];
+  const attention = h('button', { type: 'button', class: `check-line ${warn.length ? lineTone(first) : 'tone-good'}`, id: 'attention', onclick: () => openMore('checks') },
+    h('span', {}, warn.length ? first : '✓ Everything checks out'),
+    h('span', { class: 'more-count' }, warn.length > 1 ? `+${warn.length - 1} more ` : '', '›'));
 
   const tiles = h('section', { class: 'tiles' },
-    tile('Net worth', t.netWorth, 'wide'),
+    tile('Net worth', t.netWorth, () => openMore('history')),
     tile('Liquid cash', t.liquid),
-    tile('Investments + retirement', t.investments),
-    tile('Owed on cards & loans', t.owed, 'span'));
-
-  const [hLatest, hAvg, hYear] = v.flow.headers;
-  const flow = h('section', { class: 'card' },
-    h('h2', {}, 'Money flow'),
-    h('table', { class: 'flow' },
-      h('thead', {}, h('tr', {}, h('th', { scope: 'col' }, h('span', { class: 'sr-only' }, 'Item')),
-        h('th', { scope: 'col', title: hLatest }, hLatest.replace(/^Latest month \((.*)\)$/, '$1')),
-        h('th', { scope: 'col', title: hAvg }, hAvg.replace(/^Average \(last (.*) full\)$/, 'Avg of $1')),
-        h('th', { scope: 'col', title: hYear }, hYear.replace(/^This year \((.*)\)$/, '$1')))),
-      h('tbody', {}, v.flow.rows.map(([label, a, b, c]) => h('tr', { class: label.startsWith(' ') ? 'sub-row' : '' },
-        h('th', { scope: 'row' }, label.trim()), h('td', {}, a === null ? '' : whole(a)), h('td', {}, b === null ? '' : whole(b)), h('td', {}, c === null ? '' : whole(c)))))));
+    tile('Owed', t.owed),
+    tile('Investments', t.investments));
 
   const m = v.tithe;
-  const tithe = h('section', { class: 'card' },
-    h('h2', {}, 'Tithe balance', h('span', { class: `count ${m.balance > 0 ? 'tone-bad' : 'tone-good'}` }, m.balance > 0 ? 'owed' : '✓ settled')),
-    h('p', { class: 'big' }, whole(m.balance)),
-    h('p', { class: 'help' }, m.line),
-    bar(m.owed > 0 ? m.given / m.owed : 1, 'good'));
+  const tithe = h('button', { type: 'button', class: 'card line-card', id: 'tithe', onclick: () => { state.tab = 'giving'; render(); scrollTo(0, 0); } },
+    h('span', { class: 'row' },
+      h('span', { class: 'line-title' }, 'Tithe this quarter'),
+      h('span', { class: `row-value ${m.balance > 0 ? 'tone-text-bad' : 'tone-text-good'}` }, m.balance > 0 ? `${whole(m.balance)} owed ` : `✓ settled `, go())),
+    bar(m.owed > 0 ? m.given / m.owed : 1, 'good'),
+    h('span', { class: 'line-sub' }, m.line));
 
-  const tax = v.tax ? h('section', { class: 'card' },
-    h('h2', {}, 'Tax this year'),
-    h('dl', { class: 'results' },
-      h('dt', {}, 'Taxable income received'), h('dd', {}, whole(v.tax.received)),
-      h('dt', { class: 'sub-dt' }, '…of which no tax withheld'), h('dd', {}, whole(v.tax.unwithheld)),
-      h('dt', {}, 'Tax-deductible giving'), h('dd', {}, whole(v.tax.deductible))),
-    h('p', { class: 'help' }, 'Amounts received: for pay with tax withheld this is take-home pay, not the gross on a W-2. Marks are set in Settings (income sources) and on each donation.')) : null;
+  const offTrack = v.goals.filter((g) => g.status === 'Above target').length;
+  const goals = h('button', { type: 'button', class: 'card line-card', id: 'goals-line', onclick: () => { state.tab = 'goals'; render(); scrollTo(0, 0); } },
+    h('span', { class: 'row' },
+      h('span', { class: 'line-title' }, 'Goals'),
+      h('span', { class: 'row-sub' },
+        v.goals.length === 0 ? 'Add your first goal ' : goalCounts(v.goals, offTrack), go())));
 
-  const goals = state.goal !== null ? goalForm() : goalsCard(v.goals);
-
-  const accounts = h('section', { class: 'card' },
+  const accounts = h('section', { class: 'card', id: 'accounts' },
     h('h2', {}, 'Accounts'),
     v.accounts.length === 0 ? h('p', { class: 'help' }, 'No active accounts in Settings.') : null,
-    h('dl', { class: 'results accounts' }, v.accounts.flatMap((a) => [
+    h('dl', { class: 'results accounts compact' }, v.accounts.flatMap((a) => [
       h('dt', {}, String(a.name), h('span', { class: 'hint' }, [a.type, a.estimate].filter(Boolean).join(' · '))),
       h('dd', { class: a.signed < 0 ? 'tone-text-bad' : '' }, whole(a.signed)),
     ])));
 
-  const health = h('section', { class: 'card' },
-    h('h2', {}, 'Health checks'),
-    h('ul', { class: 'checks' }, v.health.map((x) => h('li', { class: lineTone(x) }, x))));
-
-  return h('div', {}, remind, head, tiles, flow, tithe, tax, goals, accounts, health);
+  return h('div', { class: 'dashboard' }, remind, head, attention, tiles, tithe, goals, accounts);
 }
 
-// ----- Goals (on the Dashboard; written to Settings rows 69-88 on export) -----
+/** "⚠ 1 off track · 2 met · 6 on the way", leaving out the counts that are 0. */
+function goalCounts(goals, offTrack) {
+  const met = goals.filter((g) => g.status === 'Met').length;
+  const onTheWay = goals.filter((g) => g.status === 'Remaining').length;
+  const rest = [met ? `${met} met` : null, onTheWay ? `${onTheWay} on the way` : null].filter(Boolean).join(' · ');
+  return [offTrack ? h('span', { class: 'tone-text-bad' }, `⚠ ${offTrack} off track${rest ? ' · ' : ' '}`) : null, rest ? `${rest} ` : null];
+}
 
-function goalsCard(list) {
+// ----- Goals (its own tab; written to Settings rows 69-88 on export) -----
+
+/** The short text beside a goal's name: "✓ Met", "⚠ $100 over" or "$4,300 to go". */
+function goalShort(g) {
+  if (g.status === 'Met') return '✓ Met';
+  if (g.status === 'Above target') return `⚠ ${whole(g.remaining)} over`;
+  return `${whole(g.remaining)} to go`;
+}
+
+function goalsScreen() {
+  if (state.goal !== null) return goalForm();
+  const list = state.out.dashboard.goals;
   const full = state.data.goals.every((g) => g.name !== null && g.name !== '');
-  const open = (goal) => { state.goal = goal; render(); document.getElementById('goal-form')?.scrollIntoView({ block: 'start' }); };
+  const open = (goal) => { state.goal = goal; render(); scrollTo(0, 0); };
   return h('section', { class: 'card', id: 'goals' },
     h('h2', {}, 'Goals'),
     list.length === 0 ? h('p', { class: 'help' }, 'No goals yet. A goal you add goes into Settings in the workbook when you export.') : null,
     list.map((g) => {
       const tone = g.status === 'Met' ? 'good' : g.status === 'Above target' ? 'bad' : 'info';
-      const sym = g.status === 'Met' ? '✓ ' : g.status === 'Above target' ? '⚠ ' : '';
       return h('div', { class: 'goal' },
-        h('div', { class: 'goal-head' },
-          h('span', { class: 'goal-name' }, String(g.name)),
-          h('span', { class: `count tone-text-${tone}` }, `${sym}${g.status}`),
-          h('button', { type: 'button', class: 'link-btn', 'aria-label': `Edit goal ${g.name}`, onclick: () => open(g.slot) }, 'Edit')),
+        h('div', { class: 'goal-head' }, h('span', { class: 'goal-name' }, String(g.name)), h('span', { class: `goal-short tone-text-${tone}` }, goalShort(g))),
         bar(g.progress, tone),
-        h('p', { class: 'help' }, goalLine(g)));
+        h('div', { class: 'goal-detail' },
+          h('p', { class: 'help' }, goalLine(g)),
+          h('button', { type: 'button', class: 'link-btn', 'aria-label': `Edit goal ${g.name}`, onclick: () => open(g.slot) }, 'Edit')));
     }),
     h('div', { class: 'btn-row' },
       h('button', { type: 'button', class: 'btn', disabled: full, onclick: () => open('new') }, 'Add goal')),
@@ -594,7 +612,7 @@ function goalForm() {
   for (const el of [type, basedOn, currentFrom]) el.addEventListener('change', show);
   show();
 
-  const close = () => { state.goal = null; render(); document.getElementById('goals')?.scrollIntoView({ block: 'start' }); };
+  const close = () => { state.goal = null; render(); scrollTo(0, 0); };
   const changed = () => { recalc(); save(); close(); };
   const saveGoal = () => {
     const amt = entry.parseAmount(target.value);
@@ -664,10 +682,16 @@ function givingScreen() {
     recalc(); save(); render();
   };
 
-  const m = state.out.dashboard.tithe;
+  const v = dashboardView(state.out, data, state.today);
+  const m = v.tithe;
+  const owed = h('section', { class: 'card', id: 'tithe-card' },
+    h('h2', {}, 'Tithe balance', h('span', { class: `count ${m.balance > 0 ? 'tone-bad' : 'tone-good'}` }, m.balance > 0 ? 'owed' : '✓ settled')),
+    h('p', { class: 'big' }, whole(m.balance)),
+    bar(m.owed > 0 ? m.given / m.owed : 1, 'good'),
+    h('p', { class: 'help' }, m.line),
+    v.tax ? h('dl', { class: 'results' }, h('dt', {}, 'Tax-deductible giving this year'), h('dd', {}, whole(v.tax.deductible))) : null);
   const form = h('section', { class: 'card' },
     h('h2', {}, editing ? 'Edit donation' : 'Add a donation'),
-    h('p', { class: 'help' }, `This quarter: ${money(m.givenThisQuarter)} given of ${money(m.owedThisQuarter)} owed.`),
     h('div', { class: 'form-grid' },
       h('label', { for: 'g-date' }, 'Date', date),
       h('label', { for: 'g-amount' }, 'Amount', amount),
@@ -705,10 +729,115 @@ function givingScreen() {
           h('small', {}, [typeof x.date === 'number' ? dayFmt.format(new Date(`${serialToIso(x.date)}T12:00:00`)) : 'no date', x.paidFrom, x.household === 'No' ? 'family money' : null, String(x.deductible ?? '').toLowerCase() === 'yes' ? 'tax-deductible' : null].filter(Boolean).join(' · '))),
         h('span', { class: 'amt' }, typeof x.amount === 'number' ? money(x.amount) : 'no amount'))),
     ]));
-  return h('div', {}, form, list);
+  return h('div', {}, editing ? null : owed, form, list);
 }
 
-// ----- File -----
+// ----- More: History, Import & export, Health checks, About -----
+
+const MORE_PAGES = {
+  history: { title: 'History', screen: () => historyScreen(), needsData: true },
+  file: { title: 'Import & export', screen: () => fileScreen(), needsData: false },
+  checks: { title: 'Health checks', screen: () => checksScreen(), needsData: true },
+  about: { title: 'About', screen: () => aboutScreen(), needsData: false },
+};
+
+/** Open a page under More. It gets a browser history entry, so the phone's Back button returns to the menu. */
+function openMore(page) {
+  state.tab = 'more';
+  state.more = page;
+  state.gift = null;
+  state.goal = null;
+  try { history.pushState({ more: page }, ''); } catch { /* some browsers refuse; the ‹ More button still works */ }
+  render();
+  scrollTo(0, 0);
+}
+
+function closeMore() {
+  if (history.state?.more) history.back(); // popstate redraws
+  else { state.more = null; render(); }
+}
+
+addEventListener('popstate', (e) => {
+  if (state.tab !== 'more') return;
+  state.more = e.state?.more ?? null;
+  render();
+});
+
+function moreScreen() {
+  if (state.more) {
+    const p = MORE_PAGES[state.more];
+    return h('div', {},
+      h('div', { class: 'sub-head' },
+        h('button', { type: 'button', class: 'back-btn', onclick: closeMore }, '‹ More'),
+        h('h2', {}, p.title)),
+      !state.data && p.needsData ? noDataScreen() : p.screen());
+  }
+  const n = changes();
+  const warn = state.out ? state.out.dashboard.health.filter((x) => !x.startsWith('✓')).length : 0;
+  const item = (page, title, sub, extra = null) =>
+    h('button', { type: 'button', class: 'menu-item', onclick: () => openMore(page) },
+      h('span', {}, h('span', { class: 'menu-title' }, title, extra), h('small', {}, sub)),
+      h('span', { class: 'go', 'aria-hidden': 'true' }, '›'));
+  return h('nav', { class: 'menu', 'aria-label': 'More' },
+    item('history', 'History', 'Every month so far, and this year’s totals'),
+    item('file', 'Import & export', n ? `${n} not exported` : 'Send the workbook to Excel, or bring a newer one in',
+      reminder().due ? h('span', { class: 'dot', 'aria-label': 'export due' }) : null),
+    item('checks', 'Health checks', !state.out ? 'After you import a workbook' : warn ? `${warn} need attention` : '✓ All fine'),
+    item('about', 'About', `Version ${VERSION}${state.waiting ? ' · an update is ready' : ''}`));
+}
+
+/** History: this year's totals, the average month, and every month so far (newest first). */
+function historyScreen() {
+  const v = dashboardView(state.out, state.data, state.today);
+  const [, hAvg, hYear] = v.flow.headers;
+  const rows = (col, labels) => v.flow.rows
+    .filter(([label, ...vals]) => vals[col] !== null && (!labels || labels.includes(label.trim())))
+    .flatMap(([label, ...vals]) => [h('dt', { class: label.startsWith(' ') ? 'sub-dt' : '' }, label.trim()), h('dd', {}, whole(vals[col]))]);
+  const year = h('section', { class: 'card', id: 'h-year' },
+    h('h2', {}, hYear.replace(/^This year \((.*)\)$/, 'This year ($1)')),
+    h('dl', { class: 'results' }, rows(2),
+      v.tax ? [h('dt', {}, 'Taxable income received'), h('dd', {}, whole(v.tax.received)),
+        h('dt', { class: 'sub-dt' }, '…of which no tax withheld'), h('dd', {}, whole(v.tax.unwithheld))] : null));
+  const avg = h('section', { class: 'card', id: 'h-avg' },
+    h('h2', {}, hAvg.replace(/^Average \(last (.*) full\)$/, 'Average month (last $1 full)')),
+    h('dl', { class: 'results' }, rows(1)));
+  const now = entry.currentMonthIndex(state.out.months, state.today);
+  const months = state.out.months.map((r, i) => ({ r, i })).filter(({ r, i }) => r.Phase !== 'pre' && i <= now).reverse();
+  const list = h('section', { class: 'card', id: 'h-months' },
+    h('h2', {}, 'Month by month'),
+    months.length === 0 ? h('p', { class: 'help' }, 'No months after the opening date yet.') : null,
+    months.map(({ r, i }) => h('button', { type: 'button', class: 'month-row', onclick: () => { state.month = i; state.tab = 'month'; state.more = null; render(); scrollTo(0, 0); } },
+      h('span', {}, h('span', { class: 'month-name' }, monthLabel(r)),
+        h('small', {}, [typeof r.TrueCost === 'number' ? `spent ${whole(r.TrueCost)}` : null, typeof r.Saved === 'number' ? `saved ${whole(r.Saved)}` : null].filter(Boolean).join(' · ') || r.Status || '')),
+      h('span', { class: 'amt' }, typeof r.NetWorth === 'number' ? whole(r.NetWorth) : '—'))));
+  return h('div', {}, year, avg, list);
+}
+
+function checksScreen() {
+  const health = state.out.dashboard.health;
+  const warn = health.filter((x) => !x.startsWith('✓'));
+  const ok = health.filter((x) => x.startsWith('✓'));
+  return h('div', {},
+    warn.length ? h('section', { class: 'card', id: 'checks-attention' }, h('h2', {}, 'Needs attention'),
+      h('ul', { class: 'checks' }, warn.map((x) => h('li', { class: lineTone(x) }, x)))) : null,
+    ok.length ? h('section', { class: 'card', id: 'checks-ok' }, h('h2', {}, 'Fine'),
+      h('ul', { class: 'checks' }, ok.map((x) => h('li', { class: lineTone(x) }, x)))) : null);
+}
+
+// ----- Import & export -----
+
+function aboutScreen() {
+  return h('section', { class: 'card' },
+    h('h2', {}, 'This app'),
+    h('dl', { class: 'facts' },
+      h('dt', {}, 'Version'), h('dd', {}, state.waiting ? `${VERSION} · ${state.waitingVersion ?? 'a new version'} is ready` : `${VERSION}`),
+      h('dt', {}, 'Offline'), h('dd', {}, navigator.serviceWorker?.controller ? '✓ works without internet' : 'available after the next start'),
+      h('dt', {}, 'Storage'), h('dd', {}, state.persisted ? '✓ kept safe on this phone' : 'on this phone; Android may clear it when space runs low')),
+    !state.persisted && !state.installed ? h('p', { class: 'help' }, 'Install the app to your home screen; Android then keeps its data safe.') : null,
+    h('div', { class: 'btn-row' },
+      state.waiting ? h('button', { type: 'button', class: 'btn primary', onclick: doUpdate }, 'Update') : null,
+      state.installPrompt ? h('button', { type: 'button', class: 'btn', onclick: doInstall }, 'Install app') : null));
+}
 
 function fileScreen() {
   const n = changes();
@@ -720,16 +849,6 @@ function fileScreen() {
       h('dt', {}, 'Not exported'), h('dd', {}, n === 0 ? '✓ nothing' : `${n} ${n === 1 ? 'entry' : 'entries'}`),
       h('dt', {}, 'Last export'), h('dd', { class: reminder().due ? 'tone-text-bad' : '' }, state.lastExport ? `${when(state.lastExport)} (${reminder().text.replace(/^Last export: /, '')})` : 'never'))
     : h('p', { class: 'help' }, 'No workbook on this phone yet.');
-  const app = h('section', { class: 'card' },
-    h('h2', {}, 'This app'),
-    h('dl', { class: 'facts' },
-      h('dt', {}, 'Version'), h('dd', {}, state.waiting ? `${VERSION} · ${state.waitingVersion ?? 'a new version'} is ready` : `${VERSION}`),
-      h('dt', {}, 'Offline'), h('dd', {}, navigator.serviceWorker?.controller ? '✓ works without internet' : 'available after the next start'),
-      h('dt', {}, 'Storage'), h('dd', {}, state.persisted ? '✓ kept safe on this phone' : 'on this phone; Android may clear it when space runs low')),
-    !state.persisted && !state.installed ? h('p', { class: 'help' }, 'Install the app to your home screen; Android then keeps its data safe.') : null,
-    h('div', { class: 'btn-row' },
-      state.waiting ? h('button', { type: 'button', class: 'btn primary', onclick: doUpdate }, 'Update') : null,
-      state.installPrompt ? h('button', { type: 'button', class: 'btn', onclick: doInstall }, 'Install app') : null));
   return h('div', {},
     h('section', { class: 'card' },
       h('h2', {}, 'Your workbook'),
@@ -737,7 +856,6 @@ function fileScreen() {
       h('div', { class: 'btn-row' },
         state.data ? h('button', { type: 'button', class: 'btn primary', onclick: doExport }, 'Export workbook') : null,
         importButton(state.data ? 'Import a newer workbook' : 'Import workbook', !state.data))),
-    app,
     h('section', { class: 'card' },
       h('h2', {}, 'How it works'),
       h('p', { class: 'help' }, 'Excel stays the record. Export sends the workbook with your entries written in; choose Quick Share to send it to your PC.'),
@@ -751,8 +869,9 @@ function fileScreen() {
 // ---------- start ----------
 
 for (const b of document.querySelectorAll('.tabs button')) {
-  b.addEventListener('click', () => { state.tab = b.dataset.tab; state.gift = null; state.goal = null; state.message = null; render(); scrollTo(0, 0); });
+  b.addEventListener('click', () => { state.tab = b.dataset.tab; state.gift = null; state.goal = null; state.more = null; state.message = null; render(); scrollTo(0, 0); });
 }
-document.getElementById('changes-chip').addEventListener('click', () => { state.tab = 'file'; render(); });
+document.getElementById('more-btn').addEventListener('click', () => { state.tab = 'more'; state.more = null; state.gift = null; state.goal = null; state.message = null; render(); scrollTo(0, 0); });
+document.getElementById('changes-chip').addEventListener('click', () => openMore('file'));
 load();
 setupServiceWorker();
