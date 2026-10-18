@@ -1,7 +1,7 @@
 // The screens in a real browser: Chromium at phone size (375 x 812), on the local test server.
 // It uses the app the way a person would: import a synthetic workbook, read the Dashboard, fill a
 // month, add a donation, reload, export through the share sheet, read the shared file back with
-// the app's own importer, and reload again. It stops at the first case that fails and says which
+// the app's own importer, reload again, then add and edit a goal. It stops at the first case that fails and says which
 // one, after how long, and what the screen showed.
 //
 // The clock is fixed at Nov 10, 2026, noon UTC, so every run sees the same months and statuses.
@@ -322,6 +322,52 @@ step('reload after the export: the export is remembered and the entries stay', a
   assert.equal(await chip(), '');
   await tab('month');
   await soon('the balance is still there', () => value('#f-balances-0'), '10,000');
+});
+
+step('Goals: add one on the Dashboard; the form asks only what the type needs', async () => {
+  await tab('dashboard');
+  const names = () => page.evaluate(() => [...document.querySelectorAll('#goals .goal-name')].map((n) => n.textContent));
+  await soon('the Dashboard lists the workbook\'s goals', async () => (await names()).length, before.goals.filter((g) => g.name).length);
+  await page.getByRole('button', { name: 'Add goal' }).click();
+  await soon('the goal form opens', () => text('#goal-form h2'), 'Add a goal');
+  const shown = () => page.evaluate(() => ['goal-target', 'goal-based', 'goal-current', 'goal-account', 'goal-date']
+    .filter((id) => !document.querySelector(`label[for="${id}"]`).hidden));
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await soon('a goal without a name is refused', () => text('#goal-form p.status'), 'Give the goal a name.');
+  await page.selectOption('#goal-type', 'Save By Date');
+  assert.deepEqual(await shown(), ['goal-target', 'goal-current', 'goal-date']);
+  await page.selectOption('#goal-current', 'Specific Account');
+  assert.deepEqual(await shown(), ['goal-target', 'goal-current', 'goal-account', 'goal-date'], 'Specific Account asks for the account');
+  await page.selectOption('#goal-type', 'Multiple');
+  assert.deepEqual(await shown(), ['goal-target', 'goal-based', 'goal-current', 'goal-account']);
+  assert.equal(await text('label[for="goal-target"] span'), 'Target (times the base)');
+  await page.selectOption('#goal-type', 'Save By Date');
+  await fitsPhone('the goal form');
+  await page.fill('#goal-name', 'Synthetic trip');
+  await page.fill('#goal-target', '2,500');
+  await page.selectOption('#goal-account', 'Emergency fund');
+  await page.fill('#goal-date', '2027-03-31');
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await soon('the new goal is listed', async () => (await names()).at(-1), 'Synthetic trip');
+  assert.equal(await chip(), '1 not exported');
+  await soon('the goal is saved on the phone', () => stored('data', 'goals.9'),
+    { name: 'Synthetic trip', type: 'Save By Date', target: 2500, basedOn: null, currentFrom: 'Specific Account', account: 'Emergency fund', targetDate: dateSerial('2027-03-31') });
+});
+
+step('Goals: Edit changes the type, and fields it no longer uses are cleared', async () => {
+  await page.getByRole('button', { name: 'Edit goal Synthetic trip' }).click();
+  await soon('the form opens with the goal', () => value('#goal-name'), 'Synthetic trip');
+  assert.equal(await value('#goal-target'), '2,500');
+  assert.equal(await value('#goal-date'), '2027-03-31');
+  await page.selectOption('#goal-type', 'Tithe Balance');
+  assert.equal(await page.isHidden('label[for="goal-target"]'), true, 'Tithe Balance needs no target');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await soon('the edited goal is saved on the phone', () => stored('data', 'goals.9'),
+    { name: 'Synthetic trip', type: 'Tithe Balance', target: null, basedOn: null, currentFrom: null, account: null, targetDate: null });
+  await soon('the card shows it with this quarter\'s tithe', () => page.evaluate(() => [...document.querySelectorAll('#goals .goal .help')].at(-1)?.textContent ?? null),
+    (t) => t?.endsWith('This quarter'));
+  assert.equal(await chip(), '1 not exported', 'one goal changed since the export');
+  await fitsPhone('the Dashboard with the new goal');
 });
 
 // ---------- run them, in order, stopping at the first failure ----------

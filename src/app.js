@@ -25,7 +25,7 @@ const when = (ms) => (ms ? dayFmt.format(new Date(ms)) : 'never');
 const state = {
   original: null, base: null, data: null, fileName: null, importedAt: null, lastExport: null,
   exported: null, exportedAt: null, // what this phone last exported, for the older-copy check
-  out: null, today: todaySerial(), tab: 'dashboard', month: 0, gift: null, persisted: false, message: null,
+  out: null, today: todaySerial(), tab: 'dashboard', month: 0, gift: null, goal: null /* null, 'new' or a slot */, persisted: false, message: null,
   // App updates and install (see setupServiceWorker)
   waiting: null, waitingVersion: null, updating: false, installPrompt: null,
   installed: matchMedia('(display-mode: standalone)').matches,
@@ -172,7 +172,7 @@ async function doImport(file) {
   const older = entry.olderCopyCheck({ exported: state.exported, exportedAt: state.exportedAt }, data);
   if (older.warn) {
     const from = older.stamp ? `comes from the export of ${stampText(older.stamp)}` : "wasn't exported by this phone";
-    const where = [older.months.length ? older.months.map(ymLabel).join(', ') : null, older.gifts ? 'Giving' : null].filter(Boolean).join('; ');
+    const where = [older.months.length ? older.months.map(ymLabel).join(', ') : null, older.gifts ? 'Giving' : null, older.goals ? 'Goals' : null].filter(Boolean).join('; ');
     if (!confirm(`This file (${file.name}) ${from}, but this phone last exported on ${stampText(state.exportedAt)}. ` +
       `It differs from that export in ${older.missing} ${older.missing === 1 ? 'entry' : 'entries'}${where ? ` (${where})` : ''}. ` +
       'It may be an older copy. Import anyway?')) return;
@@ -503,16 +503,7 @@ function dashboardScreen() {
       h('dt', {}, 'Tax-deductible giving'), h('dd', {}, whole(v.tax.deductible))),
     h('p', { class: 'help' }, 'Amounts received: for pay with tax withheld this is take-home pay, not the gross on a W-2. Marks are set in Settings (income sources) and on each donation.')) : null;
 
-  const goals = v.goals.length ? h('section', { class: 'card' },
-    h('h2', {}, 'Goals'),
-    v.goals.map((g) => {
-      const tone = g.status === 'Met' ? 'good' : g.status === 'Above target' ? 'bad' : 'info';
-      const sym = g.status === 'Met' ? '✓ ' : g.status === 'Above target' ? '⚠ ' : '';
-      return h('div', { class: 'goal' },
-        h('div', { class: 'goal-head' }, h('span', { class: 'goal-name' }, String(g.name)), h('span', { class: `count tone-text-${tone}` }, `${sym}${g.status}`)),
-        bar(g.progress, tone),
-        h('p', { class: 'help' }, goalLine(g)));
-    })) : null;
+  const goals = state.goal !== null ? goalForm() : goalsCard(v.goals);
 
   const accounts = h('section', { class: 'card' },
     h('h2', {}, 'Accounts'),
@@ -527,6 +518,115 @@ function dashboardScreen() {
     h('ul', { class: 'checks' }, v.health.map((x) => h('li', { class: lineTone(x) }, x))));
 
   return h('div', {}, remind, head, tiles, flow, tithe, tax, goals, accounts, health);
+}
+
+// ----- Goals (on the Dashboard; written to Settings rows 69-88 on export) -----
+
+function goalsCard(list) {
+  const full = state.data.goals.every((g) => g.name !== null && g.name !== '');
+  const open = (goal) => { state.goal = goal; render(); document.getElementById('goal-form')?.scrollIntoView({ block: 'start' }); };
+  return h('section', { class: 'card', id: 'goals' },
+    h('h2', {}, 'Goals'),
+    list.length === 0 ? h('p', { class: 'help' }, 'No goals yet. A goal you add goes into Settings in the workbook when you export.') : null,
+    list.map((g) => {
+      const tone = g.status === 'Met' ? 'good' : g.status === 'Above target' ? 'bad' : 'info';
+      const sym = g.status === 'Met' ? '✓ ' : g.status === 'Above target' ? '⚠ ' : '';
+      return h('div', { class: 'goal' },
+        h('div', { class: 'goal-head' },
+          h('span', { class: 'goal-name' }, String(g.name)),
+          h('span', { class: `count tone-text-${tone}` }, `${sym}${g.status}`),
+          h('button', { type: 'button', class: 'link-btn', 'aria-label': `Edit goal ${g.name}`, onclick: () => open(g.slot) }, 'Edit')),
+        bar(g.progress, tone),
+        h('p', { class: 'help' }, goalLine(g)));
+    }),
+    h('div', { class: 'btn-row' },
+      h('button', { type: 'button', class: 'btn', disabled: full, onclick: () => open('new') }, 'Add goal')),
+    full ? h('p', { class: 'help' }, 'All 20 goal rows are used. Delete one to add another.') : null);
+}
+
+const TARGET_LABEL = {
+  percentage: 'Target (% of the base)',
+  multiple: 'Target (times the base)',
+  'pay down to': 'Target (this amount or less)',
+};
+
+function goalForm() {
+  const data = state.data;
+  const editing = typeof state.goal === 'number' ? data.goals[state.goal] : null;
+  const g = editing ?? { name: null, type: null, target: null, basedOn: null, currentFrom: null, account: null, targetDate: null };
+  const choices = entry.goalChoices(data);
+  const same = (x, v) => v !== null && x.toLowerCase() === String(v).toLowerCase();
+  // A value Excel holds that isn't in the list stays selectable, so saving doesn't change it.
+  const pick = (id, list, value, blank) => h('select', { id },
+    h('option', { value: '', selected: value === null }, blank),
+    list.map((x) => h('option', { value: x, selected: same(x, value) }, x)),
+    value === null || list.some((x) => same(x, value)) ? null : h('option', { value: String(value), selected: true }, String(value)));
+
+  const name = h('input', { type: 'text', id: 'goal-name', autocomplete: 'off', maxlength: 200, value: g.name ?? '' });
+  const type = pick('goal-type', choices.types, g.type, 'Pick a type');
+  const target = h('input', { type: 'text', id: 'goal-target', inputmode: 'decimal', autocomplete: 'off', value: plain(g.target) });
+  const basedOn = pick('goal-based', choices.metrics, g.basedOn, 'Pick a number');
+  const currentFrom = pick('goal-current', choices.metrics, g.currentFrom, 'Pick a number');
+  const account = pick('goal-account', choices.accounts, g.account, 'Pick an account');
+  const date = h('input', { type: 'date', id: 'goal-date', value: typeof g.targetDate === 'number' ? serialToIso(g.targetDate) : '' });
+  const error = h('p', { class: 'status tone-bad', role: 'alert', hidden: true });
+
+  const targetText = h('span', {});
+  const rows = {
+    target: h('label', { for: 'goal-target' }, targetText, target),
+    basedOn: h('label', { for: 'goal-based' }, 'Based on', basedOn),
+    currentFrom: h('label', { for: 'goal-current' }, 'Current value from', currentFrom),
+    account: h('label', { for: 'goal-account' }, 'Account', account),
+    targetDate: h('label', { for: 'goal-date' }, 'Target date (optional)', date),
+  };
+  const titheNote = h('p', { class: 'help' }, 'The target and progress come from this quarter’s tithe.');
+  const show = () => {
+    const need = entry.goalNeeds(type.value);
+    const specific = (sel) => sel.value.toLowerCase() === 'specific account';
+    rows.target.hidden = !need.target;
+    rows.basedOn.hidden = !need.basedOn;
+    rows.currentFrom.hidden = !need.currentFrom;
+    rows.targetDate.hidden = !need.targetDate;
+    rows.account.hidden = !((need.basedOn && specific(basedOn)) || (need.currentFrom && specific(currentFrom)));
+    titheNote.hidden = type.value.toLowerCase() !== 'tithe balance';
+    targetText.textContent = TARGET_LABEL[type.value.toLowerCase()] ?? 'Target amount';
+  };
+  for (const el of [type, basedOn, currentFrom]) el.addEventListener('change', show);
+  show();
+
+  const close = () => { state.goal = null; render(); document.getElementById('goals')?.scrollIntoView({ block: 'start' }); };
+  const changed = () => { recalc(); save(); close(); };
+  const saveGoal = () => {
+    const amt = entry.parseAmount(target.value);
+    if (!rows.target.hidden && amt.error) { error.textContent = amt.error; error.hidden = false; return; }
+    const goal = {
+      name: name.value, type: type.value || null, target: amt.value ?? null,
+      basedOn: basedOn.value || null, currentFrom: currentFrom.value || null, account: account.value || null,
+      targetDate: date.value ? dateSerial(date.value) : null,
+    };
+    const problem = entry.goalProblem(goal);
+    if (problem) { error.textContent = problem; error.hidden = false; return; }
+    if (editing) entry.updateGoal(data, state.goal, goal);
+    else if (entry.addGoal(data, goal) === null) { error.textContent = 'All 20 goal rows are used.'; error.hidden = false; return; }
+    changed();
+  };
+
+  return h('section', { class: 'card', id: 'goal-form' },
+    h('h2', {}, editing ? 'Edit goal' : 'Add a goal'),
+    h('p', { class: 'help' }, 'Saved into Settings in the workbook when you export.'),
+    h('div', { class: 'form-grid' },
+      h('label', { for: 'goal-name' }, 'Goal', name),
+      h('label', { for: 'goal-type' }, 'Type', type),
+      titheNote, rows.target, rows.basedOn, rows.currentFrom, rows.account, rows.targetDate),
+    error,
+    h('div', { class: 'btn-row' },
+      h('button', { type: 'button', class: 'btn primary', onclick: saveGoal }, editing ? 'Save' : 'Add'),
+      h('button', { type: 'button', class: 'btn', onclick: close }, 'Cancel'),
+      editing ? h('button', { type: 'button', class: 'btn danger', onclick: () => {
+        if (!confirm(`Delete the goal "${editing.name}"?`)) return;
+        entry.deleteGoal(data, state.goal);
+        changed();
+      } }, 'Delete') : null));
 }
 
 // ----- Giving -----
@@ -651,7 +751,7 @@ function fileScreen() {
 // ---------- start ----------
 
 for (const b of document.querySelectorAll('.tabs button')) {
-  b.addEventListener('click', () => { state.tab = b.dataset.tab; state.gift = null; state.message = null; render(); scrollTo(0, 0); });
+  b.addEventListener('click', () => { state.tab = b.dataset.tab; state.gift = null; state.goal = null; state.message = null; render(); scrollTo(0, 0); });
 }
 document.getElementById('changes-chip').addEventListener('click', () => { state.tab = 'file'; render(); });
 load();
