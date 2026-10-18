@@ -4,7 +4,7 @@
 
 import { isBlank, N, is, DATE, YEAR, MONTH, DAYOF } from './excel.js';
 import {
-  MONTH_END_ROWS, AUTO, SHEET, monthEndEdits, givingEdits, goalEdits, GIVING_FIRST_ROW, GIVING_LAST_ROW, GOAL_COLS, GOAL_TYPES,
+  MONTH_END_ROWS, AUTO, SHEET, monthEndEdits, givingEdits, goalEdits, settingsEdits, GIVING_FIRST_ROW, GIVING_LAST_ROW, GOAL_COLS, GOAL_TYPES,
 } from './ffos.js';
 import { METRIC_NAMES } from './calc.js';
 
@@ -163,21 +163,111 @@ export function deleteGoal(data, slot) {
   data.goals[slot] = Object.fromEntries(GOAL_FIELDS.map((k) => [k, null]));
 }
 
+// ---------- Accounts, investments and income sources (Settings rows) ----------
+// Adding uses an unused slot (a blank name), so no past month changes. A new account is not
+// "required monthly": that would ask for its balance in every month since the opening date.
+// Closing types $0 in the month it closed and retires it; ending an income source sets Until.
+
+export const ACCOUNT_TYPES = ['Checking', 'Savings', 'Cash', 'Card', 'Loan'];
+export const INVESTMENT_TYPES = ['Investment', 'Retirement'];
+const SETUP_FIELDS = {
+  accounts: ['name', 'type', 'opening', 'estimate', 'active', 'required'],
+  investments: ['name', 'type', 'opening', 'contributed', 'contributedThisYear', 'estimate', 'active'],
+  sources: ['name', 'tithe', 'usual', 'frequency', 'day', 'from', 'until', 'taxable', 'withheld'],
+};
+const named = (x) => !isBlank(x.name) && String(x.name).trim() !== '';
+const cleanText = (v) => (isBlank(v) || String(v).trim() === '' ? null : String(v).trim());
+
+/** Free slots left in a table ('accounts', 'investments' or 'sources'). */
+export const freeSlots = (data, table) => data[table].filter((x) => !named(x)).length;
+
+/** What's wrong with a new or renamed account or investment, or null. Names must differ: goals find accounts by name. */
+export function setupProblem(data, table, item, slot = null) {
+  const name = cleanText(item.name);
+  if (!name) return 'Give it a name.';
+  if (table === 'accounts' && !ACCOUNT_TYPES.some((t) => is(item.type, t))) return 'Pick a type.';
+  if (table === 'investments' && !INVESTMENT_TYPES.some((t) => is(item.type, t))) return 'Pick a type.';
+  const others = table === 'sources'
+    ? data.sources.filter((x, k) => k !== slot)
+    : [...data.accounts.filter((x, k) => !(table === 'accounts' && k === slot)), ...data.investments.filter((x, k) => !(table === 'investments' && k === slot))];
+  if (others.some((x) => named(x) && String(x.name).trim().toLowerCase() === name.toLowerCase())) return `"${name}" is already used. Pick another name.`;
+  return null;
+}
+
+/** Add an everyday account (starts at $0, not required). Returns the slot, or null when all 14 are used. */
+export function addAccount(data, { name, type }) {
+  const slot = data.accounts.findIndex((x) => !named(x));
+  if (slot < 0) return null;
+  data.accounts[slot] = { ...data.accounts[slot], name: cleanText(name), type, opening: 0, estimate: 'No', active: 'Yes', required: 'No' };
+  return slot;
+}
+
+/** Add an investment account (starts at $0). Returns the slot, or null when all 6 are used. */
+export function addInvestment(data, { name, type }) {
+  const slot = data.investments.findIndex((x) => !named(x));
+  if (slot < 0) return null;
+  data.investments[slot] = { ...data.investments[slot], name: cleanText(name), type, opening: 0, contributed: 0, contributedThisYear: 0, estimate: 'No', active: 'Yes' };
+  return slot;
+}
+
+/**
+ * Add an income source from the first day of month i. usual + frequency (+ day) make the pay automatic;
+ * without them it is typed each month. Returns the slot, or null when all 12 are used.
+ */
+export function addSource(data, i, { name, tithe, usual = null, frequency = null, day = null, taxable = null, withheld = null }) {
+  const slot = data.sources.findIndex((x) => !named(x));
+  if (slot < 0) return null;
+  const [y, m] = data.months[i].ym.split('-').map(Number);
+  const auto = typeof usual === 'number' && !isBlank(frequency);
+  data.sources[slot] = {
+    ...data.sources[slot],
+    name: cleanText(name), tithe: cleanText(tithe) ?? 'Not Sure',
+    usual: auto ? usual : null, frequency: auto ? frequency : null, day: auto ? (isBlank(day) ? null : day) : null,
+    from: DATE(y, m, 1), until: null,
+    ...(data.hasTax ? { taxable: cleanText(taxable), withheld: cleanText(withheld) } : {}),
+  };
+  return slot;
+}
+
+/** Rename an account, investment or income source. Goals that track an account by name follow it. */
+export function renameSetup(data, table, slot, name) {
+  const old = String(data[table][slot].name ?? '').trim().toLowerCase();
+  data[table][slot] = { ...data[table][slot], name: cleanText(name) };
+  if (table === 'sources' || !old) return;
+  data.goals = data.goals.map((g) => (!isBlank(g.account) && String(g.account).trim().toLowerCase() === old ? { ...g, account: cleanText(name) } : g));
+}
+
+/** Close an account or investment in month i: its balance that month is $0, and it is retired (its history stays). */
+export function closeAccount(data, i, table, slot) {
+  const key = table === 'accounts' ? 'balances' : 'invValues';
+  if (data.months[i][key][slot].kind === 'formula') return false; // a formula set in Excel: change it there
+  setEntry(data, i, key, slot, 0);
+  data[table][slot] = { ...data[table][slot], active: 'No' };
+  return true;
+}
+
+/** An income source ended in month i: Until = the last day of that month. */
+export function endSource(data, i, slot) {
+  const [y, m] = data.months[i].ym.split('-').map(Number);
+  data.sources[slot] = { ...data.sources[slot], until: DATE(y, m + 1, 0) };
+}
+
 // ---------- Changes and export ----------
 
 /** Workbook edits that turn `base` (as imported) into `current`. */
 export function workbookEdits(base, current) {
-  const { me, gv, gl } = differences(base, current);
+  const { me, gv, gl, su } = differences(base, current);
   return new Map([
     [SHEET.monthEnd, monthEndEdits(me)],
     [SHEET.giving, givingEdits(gv, { tax: current.hasTax })],
-    [SHEET.settings, goalEdits(gl)],
+    [SHEET.settings, new Map([...goalEdits(gl), ...settingsEdits(su)])],
   ]);
 }
 
 /**
  * What differs between two copies of the data: Month-End fields (one per field, with its month),
- * Giving rows (one per donation added, changed or removed) and goals (one per goal slot changed).
+ * Giving rows (one per donation added, changed or removed), goals (one per goal slot changed) and
+ * accounts, investments and income sources (one per changed cell).
  */
 function differences(base, current) {
   const me = [];
@@ -206,14 +296,27 @@ function differences(base, current) {
     const b = base.goals[slot];
     if (!GOAL_FIELDS.every((f) => (g[f] ?? null) === (b?.[f] ?? null))) gl.push({ ...g, slot });
   });
-  return { me, gv, gl };
+  const su = [];
+  for (const [table, fields] of Object.entries(SETUP_FIELDS)) {
+    current[table].forEach((x, slot) => {
+      for (const field of fields) {
+        if (table === 'sources' && !current.hasTax && (field === 'taxable' || field === 'withheld')) continue;
+        if ((x[field] ?? null) !== (base[table][slot]?.[field] ?? null)) su.push({ table, slot, field, value: x[field] ?? null });
+      }
+    });
+  }
+  return { me, gv, gl, su };
 }
 
-/** Things done since `base`: each Month-End field typed or cleared, each donation and each goal added, changed or deleted counts 1. */
+/**
+ * Things done since `base`: each Month-End field typed or cleared, each donation and each goal added, changed or
+ * deleted, and each account, investment or income source added, renamed, closed or ended counts 1.
+ */
 export function changeSummary(base, current) {
-  const { me, gv, gl } = differences(base, current);
+  const { me, gv, gl, su } = differences(base, current);
+  const setup = new Set(su.map((x) => `${x.table}:${x.slot}`)).size;
   return {
-    fields: me.length, gifts: gv.length, goals: gl.length, total: me.length + gv.length + gl.length,
+    fields: me.length, gifts: gv.length, goals: gl.length, setup, total: me.length + gv.length + gl.length + setup,
     months: [...new Set(me.map((x) => x.month))],
   };
 }
@@ -261,7 +364,7 @@ export function olderCopyCheck({ exported, exportedAt }, incoming) {
   const stamp = incoming.exportStamp ?? null;
   if (stamp && stamp >= exportedAt) return { warn: false, stamp };
   const diff = changeSummary(incoming, exported);
-  return { warn: diff.total > 0, stamp, missing: diff.total, months: diff.months, gifts: diff.gifts, goals: diff.goals };
+  return { warn: diff.total > 0, stamp, missing: diff.total, months: diff.months, gifts: diff.gifts, goals: diff.goals, setup: diff.setup };
 }
 
 // ---------- Which month, and what the screen shows ----------
@@ -299,7 +402,7 @@ export function monthView(data, out, i) {
     const owed = is(a.type, 'Card') || is(a.type, 'Loan');
     accounts.push({
       key: 'balances', slot: k, label: String(a.name), cell: m.balances[k], required, retired,
-      hint: [a.type, owed ? 'amount owed' : null, retired ? 'retired' : null].filter(Boolean).join(' · '),
+      hint: [a.type, owed ? 'amount owed' : null, retired ? 'closed' : null].filter(Boolean).join(' · '),
       auto: required || future || pre || m.balances[k].kind !== 'auto' ? null : r[`Val${k}`],
     });
   });
@@ -308,11 +411,13 @@ export function monthView(data, out, i) {
   data.sources.forEach((s, k) => {
     if (isBlank(s.name)) return;
     const auto = r[`Auto${k}`];
+    const ended = typeof s.until === 'number' && s.until < r.MonthStart;
     income.push({
-      key: 'income', slot: k, label: String(s.name), cell: m.income[k],
+      key: 'income', slot: k, label: String(s.name), cell: m.income[k], ended: typeof s.until === 'number',
       hint: [
         is(s.tithe, 'Yes') ? 'tithe-able' : is(s.tithe, 'Not Sure') ? 'tithe: not sure' : null,
         data.hasTax ? taxHint(s) : null,
+        ended ? 'ended' : null,
       ].filter(Boolean).join(' · ') || null,
       auto: m.income[k].kind === 'auto' && auto ? auto : null,
     });
@@ -320,8 +425,10 @@ export function monthView(data, out, i) {
   const investments = [];
   data.investments.forEach((inv, k) => {
     if (isBlank(inv.name)) return;
+    const retired = is(inv.active, 'No');
     investments.push({
-      key: 'invValues', slot: k, label: String(inv.name), cell: m.invValues[k], hint: String(inv.type ?? ''),
+      key: 'invValues', slot: k, label: String(inv.name), cell: m.invValues[k], retired,
+      hint: [inv.type, retired ? 'closed' : null].filter(Boolean).join(' · '),
       auto: future || pre || m.invValues[k].kind !== 'auto' ? null : r[`Val${14 + k}`],
       deposit: { key: 'deposits', slot: k, label: `Moved into ${inv.name}`, cell: m.deposits[k], hint: '+ in / − out', auto: null },
     });

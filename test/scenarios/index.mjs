@@ -275,3 +275,26 @@ SCENARIOS.push({
     entry.deleteGoal(data, 4);
   },
 });
+
+// Accounts, investments and income sources set up through the app (spec section 13): the app's own export
+// writes them into Settings and Month-End, and Excel must compute the same results from what it wrote.
+SCENARIOS.push({
+  ...SCENARIOS.find((s) => s.name === 'goals'),
+  name: 'setup-edited',
+  about: 'As goals, then in the app in October: a card and an investment added, a side job added, the salary ended, '
+    + 'the emergency fund closed (its money moved to checking), and an investment renamed (a goal follows it).',
+  edit: (data, entry) => {
+    const oct = data.months.findIndex((m) => m.ym === '2026-10');
+    entry.addAccount(data, { name: 'Card B', type: 'Card' });
+    entry.setEntry(data, oct, 'balances', 3, 300);
+    entry.addInvestment(data, { name: 'Brokerage', type: 'Investment' });
+    entry.setEntry(data, oct, 'invValues', 2, 2000);
+    entry.setEntry(data, oct, 'deposits', 2, 2000);
+    entry.addSource(data, oct, { name: 'Side job', tithe: 'Yes', usual: 400, frequency: 'Monthly', day: 15 });
+    entry.endSource(data, oct, 0);
+    entry.closeAccount(data, oct, 'accounts', 1);
+    entry.setEntry(data, oct, 'balances', 0, 21500);
+    entry.setEntry(data, oct, 'balances', 2, 500);
+    entry.renameSetup(data, 'investments', 1, 'Taxable account');
+  },
+});

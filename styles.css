@@ -189,12 +189,10 @@ textarea { width: 100%; min-height: 72px; padding: 8px 10px; border: 1px solid v
 }
 .link-btn { min-height: var(--tap); margin: -8px -8px -8px 0; padding: 0 8px; border: 0; background: none; color: var(--accent); font-weight: 600; flex: none; }
 
-/* Top bar: More */
+/* Top bar: the Workbook chip */
 .top h1 { margin-right: auto; }
-.more-btn { position: relative; border: 1px solid var(--line); border-radius: 10px; min-height: 36px; padding: 0 12px; background: var(--card); color: var(--text); font-weight: 600; }
-.more-btn[aria-current="page"] { border-color: var(--accent); color: var(--accent); }
-.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--bad); margin-left: 6px; vertical-align: middle; }
-.more-btn .dot { position: absolute; top: -3px; right: -3px; margin: 0; border: 2px solid var(--card); width: 12px; height: 12px; }
+.chip.quiet { background: var(--good-soft); color: var(--good); }
+.chip[aria-current="page"] { outline: 2px solid var(--accent); }
 
 /* Dashboard: one screen */
 .dashboard .card { margin: 6px 0; padding: 10px 12px; }
@@ -220,14 +218,26 @@ button.tile { text-align: left; font: inherit; color: inherit; }
 .results.compact dt .hint { display: inline; margin-left: 6px; font-size: 0.75rem; color: var(--muted); }
 .goal-detail p.help { margin: 0; font-size: 0.8rem; }
 
-/* More */
-.menu { display: grid; gap: 8px; }
-.menu-item, .month-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; text-align: left; min-height: var(--tap); padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); }
-.menu-title { font-weight: 600; }
-.menu-item small, .month-row small { display: block; color: var(--muted); font-size: 0.85rem; }
+/* Ledger */
+.next-fill { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.next-fill > div { display: grid; }
 .sub-head { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; }
 .sub-head h2 { font-size: 1.05rem; margin: 0; }
 .back-btn { border: 0; background: none; color: var(--accent); font-weight: 600; min-height: var(--tap); padding: 0 8px 0 0; }
-.month-row { border-radius: 10px; margin: 6px 0; padding: 8px 12px; }
+.month-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; text-align: left; min-height: var(--tap); border: 1px solid var(--line); background: var(--card); border-radius: 10px; margin: 6px 0; padding: 8px 12px; }
+.month-row small { display: block; color: var(--muted); font-size: 0.85rem; }
 .month-name { font-weight: 600; }
 .month-row .amt { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Adding, renaming and closing accounts, investments and income sources */
+.field-name { display: flex; align-items: flex-start; gap: 2px; min-width: 0; }
+.field-name label { flex: 1; min-width: 0; }
+.manage { flex: none; border: 0; background: none; color: var(--muted); font-size: 1.1rem; line-height: 1; min-width: 32px; min-height: 32px; margin: -4px 0; border-radius: 8px; }
+.manage-panel { grid-column: 1 / -1; padding: 6px 0 2px; }
+.manage-panel .btn-row { margin-top: 4px; }
+.manage-panel .rename input { width: 100%; min-height: var(--tap); border: 1px solid var(--line); border-radius: 10px; padding: 0 10px; background: var(--bg); }
+.setup { padding-top: 8px; border-top: 1px solid var(--line); margin-top: 4px; }
+.add-btn { margin: 0; padding: 0; }
+.setup-form { padding-top: 4px; }
+.setup-form .form-grid { margin-bottom: 6px; }
+.setup-full { margin: 8px 0 0; }

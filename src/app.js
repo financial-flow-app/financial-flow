@@ -1,5 +1,5 @@
-// The screens: Dashboard, Month (monthly entry), Giving (donation log), Goals, and More (History, Import & export,
-// Health checks, About).
+// The screens: four tabs (Dashboard, Ledger, Giving, Goals) and two pages reached by tapping what they're about
+// (Workbook from the chip in the top bar, Health checks from the Dashboard's warning line).
 // The DOM is built with createElement only (no HTML strings), so nothing typed can run as code.
 
 import { importWorkbook, WorkbookError } from './import.js';
@@ -26,7 +26,8 @@ const when = (ms) => (ms ? dayFmt.format(new Date(ms)) : 'never');
 const state = {
   original: null, base: null, data: null, fileName: null, importedAt: null, lastExport: null,
   exported: null, exportedAt: null, // what this phone last exported, for the older-copy check
-  out: null, today: todaySerial(), tab: 'dashboard' /* dashboard, month, giving, goals or more */, month: 0, gift: null, goal: null /* null, 'new' or a slot */, more: null /* the page open under More, or null for its menu */, persisted: false, message: null,
+  out: null, today: todaySerial(), tab: 'dashboard' /* dashboard, ledger, giving or goals */, gift: null, goal: null /* null, 'new' or a slot */, entry: null /* the month open in the Ledger, or null for its list */,
+  page: null /* 'workbook' or 'checks', open over the current tab */, persisted: false, message: null,
   // App updates and install (see setupServiceWorker)
   waiting: null, waitingVersion: null, updating: false, installPrompt: null,
   installed: matchMedia('(display-mode: standalone)').matches,
@@ -87,10 +88,7 @@ async function load() {
   } catch (e) {
     state.message = `This browser won't let the app store data (${e?.message || e}).`;
   }
-  if (state.data) {
-    recalc();
-    state.month = entry.nextMonthToFill(state.out, state.today);
-  }
+  if (state.data) recalc();
   state.persisted = await store.persisted();
   // Ask again each time: Android grants it once the app is installed or used often.
   if (state.data && !state.persisted) state.persisted = await store.persist();
@@ -138,7 +136,7 @@ async function doUpdate() {
 addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault(); // show our own "Install app" button instead of the browser's banner
   state.installPrompt = e;
-  if (state.tab === 'more') render();
+  if (state.page === 'workbook') render();
 });
 addEventListener('appinstalled', async () => {
   state.installPrompt = null;
@@ -173,7 +171,7 @@ async function doImport(file) {
   const older = entry.olderCopyCheck({ exported: state.exported, exportedAt: state.exportedAt }, data);
   if (older.warn) {
     const from = older.stamp ? `comes from the export of ${stampText(older.stamp)}` : "wasn't exported by this phone";
-    const where = [older.months.length ? older.months.map(ymLabel).join(', ') : null, older.gifts ? 'Giving' : null, older.goals ? 'Goals' : null].filter(Boolean).join('; ');
+    const where = [older.months.length ? older.months.map(ymLabel).join(', ') : null, older.gifts ? 'Giving' : null, older.goals ? 'Goals' : null, older.setup ? 'Accounts and income' : null].filter(Boolean).join('; ');
     if (!confirm(`This file (${file.name}) ${from}, but this phone last exported on ${stampText(state.exportedAt)}. ` +
       `It differs from that export in ${older.missing} ${older.missing === 1 ? 'entry' : 'entries'}${where ? ` (${where})` : ''}. ` +
       'It may be an older copy. Import anyway?')) return;
@@ -185,9 +183,7 @@ async function doImport(file) {
     .catch(showStorageError);
   state.persisted = await store.persist();
   recalc();
-  state.month = entry.nextMonthToFill(state.out, state.today);
-  state.tab = 'month';
-  render();
+  navigate({ tab: 'ledger', entry: entry.nextMonthToFill(state.out, state.today) });
 }
 
 async function doExport() {
@@ -243,17 +239,13 @@ function render() {
     if (b.dataset.tab === state.tab) b.setAttribute('aria-current', 'page');
     else b.removeAttribute('aria-current');
   }
-  const moreBtn = document.getElementById('more-btn');
-  if (state.tab === 'more') moreBtn.setAttribute('aria-current', 'page');
-  else moreBtn.removeAttribute('aria-current');
-  document.getElementById('more-dot').hidden = !(state.data && reminder().due);
   const main = document.getElementById('main');
-  const screen = state.tab === 'more' ? moreScreen()
+  const screen = state.page ? pageScreen()
     : !state.data ? noDataScreen()
     : state.tab === 'dashboard' ? dashboardScreen()
     : state.tab === 'giving' ? givingScreen()
     : state.tab === 'goals' ? goalsScreen()
-    : monthScreen();
+    : ledgerScreen();
   const banners = [];
   if (state.waiting) {
     banners.push(h('div', { class: 'banner tone-info', role: 'status' },
@@ -269,11 +261,14 @@ function reminder() {
   return entry.exportReminder({ lastExport: state.lastExport, importedAt: state.importedAt, changes: changes() });
 }
 
+/** The chip in the top bar: always there, and the way to the Workbook page (export, import, the app's version). */
 function updateChip() {
   const chip = document.getElementById('changes-chip');
   const n = changes();
-  chip.hidden = n === 0;
-  chip.textContent = `${n} not exported`;
+  chip.textContent = !state.data ? 'Workbook' : n ? `${n} not exported` : '✓ Up to date';
+  chip.classList.toggle('quiet', !!state.data && n === 0);
+  if (state.page === 'workbook') chip.setAttribute('aria-current', 'page');
+  else chip.removeAttribute('aria-current');
 }
 
 function importButton(label, primary = false) {
@@ -288,40 +283,83 @@ function noDataScreen() {
     h('div', { class: 'btn-row' }, importButton('Import workbook', true)));
 }
 
-// ----- Month -----
+// ----- Ledger: every month (newest first) and this year's totals; tap a month to fill or fix it -----
+
+/** Open month i's entry screen (the phone's Back button returns to where you were). */
+const openEntry = (i) => navigate({ tab: 'ledger', entry: i });
+
+function ledgerScreen() {
+  return state.entry === null ? ledgerList() : monthScreen(state.entry);
+}
+
+function ledgerList() {
+  const out = state.out;
+  const v = dashboardView(out, state.data, state.today);
+  const now = entry.currentMonthIndex(out.months, state.today);
+  const next = entry.nextMonthToFill(out, state.today);
+  const nr = out.months[next];
+  const fill = h('section', { class: 'card next-fill', id: 'next-fill' },
+    h('div', {},
+      h('span', { class: 'line-title' }, `Next: ${monthYear(nr.MonthStart)}`),
+      nr.Status ? h('span', { class: `line-sub ${toneOf(nr.Status).replace('tone-', 'tone-text-')}` }, nr.Status) : null),
+    h('button', { type: 'button', class: 'btn primary', onclick: () => openEntry(next) }, 'Fill →'));
+
+  const [, hAvg, hYear] = v.flow.headers;
+  const rows = (col) => v.flow.rows
+    .filter(([, ...vals]) => vals[col] !== null)
+    .flatMap(([label, ...vals]) => [h('dt', { class: label.startsWith(' ') ? 'sub-dt' : '' }, label.trim()), h('dd', {}, whole(vals[col]))]);
+  const year = h('section', { class: 'card', id: 'h-year' },
+    h('h2', {}, hYear.replace(/^This year \((.*)\)$/, 'This year ($1)')),
+    h('dl', { class: 'results' }, rows(2),
+      v.tax ? [h('dt', {}, 'Taxable income received'), h('dd', {}, whole(v.tax.received)),
+        h('dt', { class: 'sub-dt' }, '…of which no tax withheld'), h('dd', {}, whole(v.tax.unwithheld))] : null));
+  const avg = h('section', { class: 'card', id: 'h-avg' },
+    h('h2', {}, hAvg.replace(/^Average \(last (.*) full\)$/, 'Average month (last $1 full)')),
+    h('dl', { class: 'results' }, rows(1)));
+
+  // Every month up to this one, newest first (months before the opening date are history only).
+  const months = out.months.slice(0, now + 1).map((r, i) => ({ r, i })).reverse();
+  const list = h('section', { class: 'card', id: 'h-months' },
+    h('h2', {}, 'Month by month'),
+    months.map(({ r, i }) => h('button', { type: 'button', class: 'month-row', onclick: () => openEntry(i) },
+      h('span', {}, h('span', { class: 'month-name' }, monthLabel(r)),
+        h('small', {}, [typeof r.TrueCost === 'number' ? `spent ${whole(r.TrueCost)}` : null, typeof r.Saved === 'number' ? `saved ${whole(r.Saved)}` : null].filter(Boolean).join(' · ') || r.Status || '')),
+      h('span', { class: 'amt' }, typeof r.NetWorth === 'number' ? whole(r.NetWorth) : '—'))));
+  return h('div', {}, fill, year, avg, list);
+}
+
+// ----- A month's entry screen (with adding and closing accounts, investments and income sources) -----
 
 let fieldRefs = [];
 
-function monthScreen() {
+function monthScreen(i) {
   const out = state.out;
-  const now = entry.currentMonthIndex(out.months, state.today);
-  const i = Math.min(state.month, now);
   const view = entry.monthView(state.data, out, i);
+  const ml = monthYear(out.months[i].MonthStart);
   fieldRefs = [];
-  const go = (j) => { state.month = j; render(); };
-
-  const select = h('select', { 'aria-label': 'Month', id: 'month-select', onchange: (e) => go(Number(e.target.value)) },
-    out.months.slice(0, now + 1).map((r, j) => h('option', { value: j, selected: j === i }, monthLabel(r))).reverse());
 
   const sections = [
-    h('div', { class: 'switcher' },
-      h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Previous month', disabled: i === 0, onclick: () => go(i - 1) }, '‹'),
-      select,
-      h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Next month', disabled: i >= now, onclick: () => go(i + 1) }, '›')),
+    h('div', { class: 'sub-head' },
+      h('button', { type: 'button', class: 'back-btn', onclick: goBack }, '‹ Back'),
+      h('h2', { id: 'month-title' }, ml)),
     h('p', { class: `status ${toneOf(view.status)}`, id: 'month-status', role: 'status' }, view.status || ''),
   ];
+  const manage = (table, f, extra) => ({ table, slot: f.slot, name: f.label, month: ml, i, ...extra });
   if (view.phase === 'pre') {
     sections.push(h('section', { class: 'card' }, h('p', { class: 'help' }, 'Before the opening date, balances aren\'t used. Income and giving still count toward tithe.')));
   } else {
     sections.push(card('Balances', 'Month-end balances. Cards and loans: the amount owed.',
-      view.accounts.map((f) => field(i, f)), h('span', { class: 'count', id: 'missing-count' })));
+      [view.accounts.map((f) => field(i, f, false, manage('accounts', f, { retired: f.retired }))),
+        addForm(i, 'accounts')],
+      h('span', { class: 'count', id: 'missing-count' })));
   }
-  sections.push(card('Income', view.income.length ? 'Grey = the automatic amount from Settings. Type to change it.' : 'No income sources are set up in Settings.',
-    view.income.map((f) => field(i, f))));
+  sections.push(card('Income', view.income.length ? 'Grey = the automatic amount from Settings. Type to change it.' : 'No income sources yet.',
+    [view.income.map((f) => field(i, f, false, manage('sources', f, { ended: f.ended }))), addForm(i, 'sources')]));
   sections.push(card('Costs', null, [field(i, view.family), field(i, view.oneTime)]));
-  if (view.investments.length) {
-    sections.push(card('Investments', 'Value at month end, and money moved in (+) or out (−).',
-      view.investments.flatMap((f) => [field(i, f), field(i, f.deposit, true)])));
+  if (view.phase !== 'pre') {
+    sections.push(card('Investments', view.investments.length ? 'Value at month end, and money moved in (+) or out (−).' : 'No investment accounts yet.',
+      [view.investments.flatMap((f) => [field(i, f, false, manage('investments', f, { retired: f.retired })), field(i, f.deposit, true)]),
+        addForm(i, 'investments')]));
   }
   sections.push(h('section', { class: 'card' },
     h('h2', {}, h('label', { for: 'note' }, 'Note')),
@@ -342,7 +380,109 @@ function card(title, help, fields, extra = null) {
   return h('section', { class: 'card' }, h('h2', {}, title, extra), help ? h('p', { class: 'help' }, help) : null, fields);
 }
 
-function field(i, f, sub = false) {
+const SETUP_WORDS = {
+  accounts: { add: 'Add account', noun: 'account', full: 'All 14 account rows are used.' },
+  investments: { add: 'Add investment', noun: 'investment', full: 'All 6 investment rows are used.' },
+  sources: { add: 'Add income source', noun: 'income source', full: 'All 12 income-source rows are used.' },
+};
+
+/** "+ Add account" (or investment, or income source) and its small form, at the end of a section. */
+function addForm(i, table) {
+  const w = SETUP_WORDS[table];
+  if (entry.freeSlots(state.data, table) === 0) return h('p', { class: 'help setup-full' }, w.full);
+  const id = (k) => `add-${table}-${k}`;
+  const box = h('div', { class: 'setup-form', id: id('form'), hidden: true });
+  const open = h('button', { type: 'button', class: 'link-btn add-btn', id: id('open') }, `+ ${w.add}`);
+  const error = h('p', { class: 'status tone-bad', role: 'alert', hidden: true });
+  const name = h('input', { type: 'text', id: id('name'), autocomplete: 'off', maxlength: 100 });
+  const select = (k, options, blank = null) => h('select', { id: id(k) },
+    blank ? h('option', { value: '' }, blank) : null, options.map((o) => h('option', { value: o }, o)));
+  const label = (k, text, el) => h('label', { for: id(k) }, text, el);
+  let fields;
+  if (table === 'sources') {
+    const tax = state.data.hasTax;
+    fields = [
+      label('name', 'Name', name),
+      label('tithe', 'Counts toward tithe?', select('tithe', ['Yes', 'No', 'Not Sure'])),
+      label('usual', 'Usual amount (optional, for automatic pay)', h('input', { type: 'text', id: id('usual'), inputmode: 'decimal', autocomplete: 'off' })),
+      label('frequency', 'How often (optional)', select('frequency', ['Monthly', 'Weekly'], '—')),
+      label('day', 'Payday (day of month, or weekday for weekly)', h('input', { type: 'text', id: id('day'), autocomplete: 'off', maxlength: 10 })),
+      tax ? label('taxable', 'Taxable?', select('taxable', ['Yes', 'No', 'Not Sure'], '—')) : null,
+      tax ? label('withheld', 'Tax withheld?', select('withheld', ['Yes', 'No'], '—')) : null,
+    ];
+  } else {
+    fields = [label('name', 'Name', name), label('type', 'Type', select('type', table === 'accounts' ? entry.ACCOUNT_TYPES : entry.INVESTMENT_TYPES))];
+  }
+  const help = table === 'sources'
+    ? `Counts from ${monthYear(state.out.months[i].MonthStart)} on.`
+    : `Starts at $0. Type its balance from the month you opened it. It isn't “required”, so a blank month counts as unchanged.`;
+  const val = (k) => box.querySelector(`#${id(k)}`)?.value ?? '';
+  const submit = () => {
+    const problem = (msg) => { error.textContent = msg; error.hidden = false; };
+    if (table === 'sources') {
+      const usual = entry.parseAmount(val('usual'));
+      if (usual.error) return problem(usual.error);
+      const p = entry.setupProblem(state.data, 'sources', { name: val('name') });
+      if (p) return problem(p);
+      const dayText = val('day').trim();
+      const day = /^\d{1,2}$/.test(dayText) ? Number(dayText) : dayText || null;
+      entry.addSource(state.data, i, { name: val('name'), tithe: val('tithe'), usual: usual.value, frequency: val('frequency') || null, day,
+        taxable: val('taxable') || null, withheld: val('withheld') || null });
+    } else {
+      const item = { name: val('name'), type: val('type') };
+      const p = entry.setupProblem(state.data, table, item);
+      if (p) return problem(p);
+      if (table === 'accounts') entry.addAccount(state.data, item);
+      else entry.addInvestment(state.data, item);
+    }
+    recalc(); save(); render();
+  };
+  box.append(h('div', { class: 'form-grid' }, fields), h('p', { class: 'help' }, help), error,
+    h('div', { class: 'btn-row' },
+      h('button', { type: 'button', class: 'btn primary', onclick: submit }, 'Add'),
+      h('button', { type: 'button', class: 'btn', onclick: () => { box.hidden = true; open.hidden = false; } }, 'Cancel')));
+  open.addEventListener('click', () => { box.hidden = false; open.hidden = true; name.focus(); });
+  return h('div', { class: 'setup' }, open, box);
+}
+
+/** The ⋯ panel under an account, investment or income source: Rename, and Close (or Ended) this month. */
+function managePanel(m) {
+  const w = SETUP_WORDS[m.table];
+  const panel = h('div', { class: 'manage-panel', hidden: true });
+  const show = (...kids) => panel.replaceChildren(...kids);
+  const done = () => { recalc(); save(); render(); };
+  const rename = () => {
+    const input = h('input', { type: 'text', value: m.name, maxlength: 100, 'aria-label': `New name for ${m.name}` });
+    const error = h('p', { class: 'status tone-bad', role: 'alert', hidden: true });
+    show(h('div', { class: 'rename' }, input), error, h('div', { class: 'btn-row' },
+      h('button', { type: 'button', class: 'btn primary', onclick: () => {
+        const p = entry.setupProblem(state.data, m.table, { name: input.value, type: m.table === 'sources' ? null : state.data[m.table][m.slot].type }, m.slot);
+        if (p) { error.textContent = p; error.hidden = false; return; }
+        entry.renameSetup(state.data, m.table, m.slot, input.value); done();
+      } }, 'Save name'),
+      h('button', { type: 'button', class: 'btn', onclick: menu }, 'Cancel')));
+    input.focus();
+  };
+  const close = () => show(
+    h('p', { class: 'help' }, m.table === 'sources'
+      ? `${m.name} ended in ${m.month}: its automatic pay stops after this month. Past months stay as they are.`
+      : `Close ${m.name} in ${m.month}? Its balance becomes $0 this month and it's marked closed. Its history stays.`),
+    h('div', { class: 'btn-row' },
+      h('button', { type: 'button', class: 'btn danger', onclick: () => {
+        if (m.table === 'sources') entry.endSource(state.data, m.i, m.slot);
+        else entry.closeAccount(state.data, m.i, m.table, m.slot);
+        done();
+      } }, m.table === 'sources' ? 'It ended this month' : `Close ${w.noun}`),
+      h('button', { type: 'button', class: 'btn', onclick: menu }, 'Cancel')));
+  const menu = () => show(h('div', { class: 'btn-row' },
+    h('button', { type: 'button', class: 'btn', onclick: rename }, 'Rename'),
+    m.retired || m.ended ? null : h('button', { type: 'button', class: 'btn', onclick: close }, m.table === 'sources' ? `Ended in ${m.month}` : `Close in ${m.month}`),
+    h('button', { type: 'button', class: 'btn', onclick: () => { panel.hidden = true; } }, 'Done')));
+  menu();
+  return panel;
+}
+
+function field(i, f, sub = false, manage = null) {
   const id = `f-${f.key}-${f.slot ?? 0}`;
   const isFormula = f.cell.kind === 'formula';
   const input = h('input', {
@@ -359,10 +499,15 @@ function field(i, f, sub = false) {
       onpointerdown: (e) => e.preventDefault(), // keep the keyboard open
     }, '±')
     : null;
+  const panel = manage ? managePanel(manage) : null;
+  const more = manage ? h('button', { type: 'button', class: 'manage', 'aria-label': `More for ${f.label}`, title: 'Rename or close',
+    onclick: () => { panel.hidden = !panel.hidden; } }, '⋯') : null;
   const el = h('div', { class: `field${sub ? ' sub' : ''}` },
-    h('label', { for: id }, f.label, f.required ? h('span', { class: 'req' }, 'required') : null, hint ? h('span', { class: 'hint' }, hint) : null),
+    h('div', { class: 'field-name' },
+      h('label', { for: id }, f.label, f.required ? h('span', { class: 'req' }, 'required') : null, hint ? h('span', { class: 'hint' }, hint) : null),
+      more),
     h('div', { class: `input-wrap${sign ? ' has-sign' : ''}` }, sign, input, isFormula ? null : clear),
-    error);
+    error, panel);
   const commit = (value) => {
     if (!entry.setEntry(state.data, i, f.key, f.slot, value)) return;
     input.value = value === null ? '' : plain(value);
@@ -378,7 +523,7 @@ function field(i, f, sub = false) {
   input.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
-    const all = [...document.querySelectorAll('main input:not([readonly]), main textarea')];
+    const all = [...document.querySelectorAll('main .field input:not([readonly]), main textarea')];
     const next = all[all.indexOf(input) + 1];
     if (next) next.focus();
     else input.blur();
@@ -413,10 +558,6 @@ function refreshMonth(i) {
     if (!f) continue;
     ref.input.placeholder = f.auto !== null ? plain(f.auto) : f.required ? 'required' : '';
     ref.clear.hidden = f.cell.kind !== 'typed';
-  }
-  // A change can complete this month or the next one, so relabel every month in the picker.
-  for (const opt of document.getElementById('month-select')?.options ?? []) {
-    opt.textContent = monthLabel(state.out.months[Number(opt.value)]);
   }
   const status = document.getElementById('month-status');
   if (status) {
@@ -458,7 +599,8 @@ function goalLine(g) {
   return [...parts, g.note].filter(Boolean).join(' · ');
 }
 
-// The Dashboard answers one question: are we OK, and does anything need me? Everything on it fits one phone screen.
+// The Dashboard answers one question: are we OK, and does anything need me? Everything on it fits one phone screen,
+// and each part opens the place it's about.
 function dashboardScreen() {
   const v = dashboardView(state.out, state.data, state.today);
   const t = v.tiles;
@@ -468,7 +610,7 @@ function dashboardScreen() {
       x.line ? h('span', { class: `tile-line ${x.tone ? `tone-text-${x.tone}` : ''}` }, x.line) : null];
     return onclick ? h('button', { type: 'button', class: 'tile', onclick }, kids) : h('div', { class: 'tile' }, kids);
   };
-  const goTo = (i) => { state.month = i; state.tab = 'month'; render(); scrollTo(0, 0); };
+  const goTo = (i) => openEntry(i);
   const go = () => h('span', { class: 'go', 'aria-hidden': 'true' }, '›');
 
   // One row: "As of Sep 30, 2026" and "Fill Oct 2026 →" (the full date and month are in the title).
@@ -482,23 +624,23 @@ function dashboardScreen() {
   const rem = reminder();
   const remind = rem.due ? h('div', { class: 'banner tone-bad', role: 'status' },
     h('span', {}, `⚠ ${rem.text}. Export so Excel has your ${changes()} new ${changes() === 1 ? 'entry' : 'entries'}.`),
-    h('button', { type: 'button', class: 'btn', onclick: () => openMore('file') }, 'Export')) : null;
+    h('button', { type: 'button', class: 'btn', onclick: () => openPage('workbook') }, 'Export')) : null;
 
   // The most urgent health check, with "+N more"; all of them are under More → Health checks.
   const warn = v.health.filter((x) => !x.startsWith('✓'));
   const first = warn.find((x) => x.startsWith('⚠')) ?? warn[0];
-  const attention = h('button', { type: 'button', class: `check-line ${warn.length ? lineTone(first) : 'tone-good'}`, id: 'attention', onclick: () => openMore('checks') },
+  const attention = h('button', { type: 'button', class: `check-line ${warn.length ? lineTone(first) : 'tone-good'}`, id: 'attention', onclick: () => openPage('checks') },
     h('span', {}, warn.length ? first : '✓ Everything checks out'),
     h('span', { class: 'more-count' }, warn.length > 1 ? `+${warn.length - 1} more ` : '', '›'));
 
   const tiles = h('section', { class: 'tiles' },
-    tile('Net worth', t.netWorth, () => openMore('history')),
+    tile('Net worth', t.netWorth, () => switchTab('ledger')),
     tile('Liquid cash', t.liquid),
     tile('Owed', t.owed),
     tile('Investments', t.investments));
 
   const m = v.tithe;
-  const tithe = h('button', { type: 'button', class: 'card line-card', id: 'tithe', onclick: () => { state.tab = 'giving'; render(); scrollTo(0, 0); } },
+  const tithe = h('button', { type: 'button', class: 'card line-card', id: 'tithe', onclick: () => switchTab('giving') },
     h('span', { class: 'row' },
       h('span', { class: 'line-title' }, 'Tithe this quarter'),
       h('span', { class: `row-value ${m.balance > 0 ? 'tone-text-bad' : 'tone-text-good'}` }, m.balance > 0 ? `${whole(m.balance)} owed ` : `✓ settled `, go())),
@@ -506,7 +648,7 @@ function dashboardScreen() {
     h('span', { class: 'line-sub' }, m.line));
 
   const offTrack = v.goals.filter((g) => g.status === 'Above target').length;
-  const goals = h('button', { type: 'button', class: 'card line-card', id: 'goals-line', onclick: () => { state.tab = 'goals'; render(); scrollTo(0, 0); } },
+  const goals = h('button', { type: 'button', class: 'card line-card', id: 'goals-line', onclick: () => switchTab('goals') },
     h('span', { class: 'row' },
       h('span', { class: 'line-title' }, 'Goals'),
       h('span', { class: 'row-sub' },
@@ -732,85 +874,57 @@ function givingScreen() {
   return h('div', {}, editing ? null : owed, form, list);
 }
 
-// ----- More: History, Import & export, Health checks, About -----
+// ----- Pages you reach by tapping what they're about: Workbook (the chip) and Health checks (the warning line) -----
 
-const MORE_PAGES = {
-  history: { title: 'History', screen: () => historyScreen(), needsData: true },
-  file: { title: 'Import & export', screen: () => fileScreen(), needsData: false },
+const PAGES = {
+  workbook: { title: 'Workbook', screen: () => fileScreen(), needsData: false },
   checks: { title: 'Health checks', screen: () => checksScreen(), needsData: true },
-  about: { title: 'About', screen: () => aboutScreen(), needsData: false },
 };
 
-/** Open a page under More. It gets a browser history entry, so the phone's Back button returns to the menu. */
-function openMore(page) {
-  state.tab = 'more';
-  state.more = page;
-  state.gift = null;
-  state.goal = null;
-  try { history.pushState({ more: page }, ''); } catch { /* some browsers refuse; the ‹ More button still works */ }
+// Navigation. Opening a month or a page adds a browser history entry, so the phone's Back button returns
+// to where you were; switching tabs replaces the entry (Back from a tab leaves the app, as in other apps).
+let navDepth = 0;
+
+function navigate({ tab = state.tab, entry: e = null, page = null }) {
+  try { history.replaceState({ tab: state.tab, entry: state.entry, page: state.page }, ''); } catch { /* storage of history refused */ }
+  Object.assign(state, { tab, entry: e, page, gift: null, goal: null, message: null });
+  try { history.pushState({ tab, entry: e, page }, ''); navDepth++; } catch { /* the ‹ Back button still works */ }
   render();
   scrollTo(0, 0);
 }
 
-function closeMore() {
-  if (history.state?.more) history.back(); // popstate redraws
-  else { state.more = null; render(); }
+function switchTab(tab) {
+  Object.assign(state, { tab, entry: null, page: null, gift: null, goal: null, message: null });
+  try { history.replaceState({ tab, entry: null, page: null }, ''); } catch { /* fine without */ }
+  render();
+  scrollTo(0, 0);
+}
+
+function goBack() {
+  if (navDepth > 0) { history.back(); return; } // popstate redraws
+  if (state.page) state.page = null;
+  else state.entry = null;
+  render();
+  scrollTo(0, 0);
 }
 
 addEventListener('popstate', (e) => {
-  if (state.tab !== 'more') return;
-  state.more = e.state?.more ?? null;
+  navDepth = Math.max(0, navDepth - 1);
+  const s = e.state ?? {};
+  Object.assign(state, { tab: s.tab ?? 'dashboard', entry: s.entry ?? null, page: s.page ?? null, gift: null, goal: null });
   render();
+  scrollTo(0, 0);
 });
 
-function moreScreen() {
-  if (state.more) {
-    const p = MORE_PAGES[state.more];
-    return h('div', {},
-      h('div', { class: 'sub-head' },
-        h('button', { type: 'button', class: 'back-btn', onclick: closeMore }, '‹ More'),
-        h('h2', {}, p.title)),
-      !state.data && p.needsData ? noDataScreen() : p.screen());
-  }
-  const n = changes();
-  const warn = state.out ? state.out.dashboard.health.filter((x) => !x.startsWith('✓')).length : 0;
-  const item = (page, title, sub, extra = null) =>
-    h('button', { type: 'button', class: 'menu-item', onclick: () => openMore(page) },
-      h('span', {}, h('span', { class: 'menu-title' }, title, extra), h('small', {}, sub)),
-      h('span', { class: 'go', 'aria-hidden': 'true' }, '›'));
-  return h('nav', { class: 'menu', 'aria-label': 'More' },
-    item('history', 'History', 'Every month so far, and this year’s totals'),
-    item('file', 'Import & export', n ? `${n} not exported` : 'Send the workbook to Excel, or bring a newer one in',
-      reminder().due ? h('span', { class: 'dot', 'aria-label': 'export due' }) : null),
-    item('checks', 'Health checks', !state.out ? 'After you import a workbook' : warn ? `${warn} need attention` : '✓ All fine'),
-    item('about', 'About', `Version ${VERSION}${state.waiting ? ' · an update is ready' : ''}`));
-}
+const openPage = (page) => navigate({ tab: state.tab, entry: state.entry, page });
 
-/** History: this year's totals, the average month, and every month so far (newest first). */
-function historyScreen() {
-  const v = dashboardView(state.out, state.data, state.today);
-  const [, hAvg, hYear] = v.flow.headers;
-  const rows = (col, labels) => v.flow.rows
-    .filter(([label, ...vals]) => vals[col] !== null && (!labels || labels.includes(label.trim())))
-    .flatMap(([label, ...vals]) => [h('dt', { class: label.startsWith(' ') ? 'sub-dt' : '' }, label.trim()), h('dd', {}, whole(vals[col]))]);
-  const year = h('section', { class: 'card', id: 'h-year' },
-    h('h2', {}, hYear.replace(/^This year \((.*)\)$/, 'This year ($1)')),
-    h('dl', { class: 'results' }, rows(2),
-      v.tax ? [h('dt', {}, 'Taxable income received'), h('dd', {}, whole(v.tax.received)),
-        h('dt', { class: 'sub-dt' }, '…of which no tax withheld'), h('dd', {}, whole(v.tax.unwithheld))] : null));
-  const avg = h('section', { class: 'card', id: 'h-avg' },
-    h('h2', {}, hAvg.replace(/^Average \(last (.*) full\)$/, 'Average month (last $1 full)')),
-    h('dl', { class: 'results' }, rows(1)));
-  const now = entry.currentMonthIndex(state.out.months, state.today);
-  const months = state.out.months.map((r, i) => ({ r, i })).filter(({ r, i }) => r.Phase !== 'pre' && i <= now).reverse();
-  const list = h('section', { class: 'card', id: 'h-months' },
-    h('h2', {}, 'Month by month'),
-    months.length === 0 ? h('p', { class: 'help' }, 'No months after the opening date yet.') : null,
-    months.map(({ r, i }) => h('button', { type: 'button', class: 'month-row', onclick: () => { state.month = i; state.tab = 'month'; state.more = null; render(); scrollTo(0, 0); } },
-      h('span', {}, h('span', { class: 'month-name' }, monthLabel(r)),
-        h('small', {}, [typeof r.TrueCost === 'number' ? `spent ${whole(r.TrueCost)}` : null, typeof r.Saved === 'number' ? `saved ${whole(r.Saved)}` : null].filter(Boolean).join(' · ') || r.Status || '')),
-      h('span', { class: 'amt' }, typeof r.NetWorth === 'number' ? whole(r.NetWorth) : '—'))));
-  return h('div', {}, year, avg, list);
+function pageScreen() {
+  const p = PAGES[state.page];
+  return h('div', {},
+    h('div', { class: 'sub-head' },
+      h('button', { type: 'button', class: 'back-btn', onclick: goBack }, '‹ Back'),
+      h('h2', {}, p.title)),
+    !state.data && p.needsData ? noDataScreen() : p.screen());
 }
 
 function checksScreen() {
@@ -824,7 +938,7 @@ function checksScreen() {
       h('ul', { class: 'checks' }, ok.map((x) => h('li', { class: lineTone(x) }, x)))) : null);
 }
 
-// ----- Import & export -----
+// ----- The Workbook page: import and export, and the app itself -----
 
 function aboutScreen() {
   return h('section', { class: 'card' },
@@ -856,6 +970,7 @@ function fileScreen() {
       h('div', { class: 'btn-row' },
         state.data ? h('button', { type: 'button', class: 'btn primary', onclick: doExport }, 'Export workbook') : null,
         importButton(state.data ? 'Import a newer workbook' : 'Import workbook', !state.data))),
+    aboutScreen(),
     h('section', { class: 'card' },
       h('h2', {}, 'How it works'),
       h('p', { class: 'help' }, 'Excel stays the record. Export sends the workbook with your entries written in; choose Quick Share to send it to your PC.'),
@@ -869,9 +984,8 @@ function fileScreen() {
 // ---------- start ----------
 
 for (const b of document.querySelectorAll('.tabs button')) {
-  b.addEventListener('click', () => { state.tab = b.dataset.tab; state.gift = null; state.goal = null; state.more = null; state.message = null; render(); scrollTo(0, 0); });
+  b.addEventListener('click', () => switchTab(b.dataset.tab));
 }
-document.getElementById('more-btn').addEventListener('click', () => { state.tab = 'more'; state.more = null; state.gift = null; state.goal = null; state.message = null; render(); scrollTo(0, 0); });
-document.getElementById('changes-chip').addEventListener('click', () => openMore('file'));
+document.getElementById('changes-chip').addEventListener('click', () => (state.page === 'workbook' ? goBack() : openPage('workbook')));
 load();
 setupServiceWorker();

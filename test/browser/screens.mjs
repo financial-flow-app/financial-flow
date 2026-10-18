@@ -1,10 +1,10 @@
 // The screens in a real browser at phone size (375 x 812), on the local test server: Chromium (the
 // engine of Android's Chrome) by default, or WebKit (the engine of every iPhone browser) with
 // BROWSER=webkit. It uses the app the way a person would: import a synthetic workbook, read the
-// Dashboard, visit the More pages, fill a month, add a donation, reload, export through the share
-// sheet, read the shared file back with the app's own importer, reload again, then add and edit a
-// goal. It stops at the first case that fails and says which one, after how long, and what the
-// screen showed.
+// Dashboard, open the Ledger, Health checks and the Workbook page, fill a month, add a donation, reload,
+// export through the share sheet, read the shared file back with the app's own importer, reload again,
+// add and edit a goal, then add and close accounts and income sources in a month. It stops at the
+// first case that fails and says which one, after how long, and what the screen showed.
 //
 // The clock is fixed at Nov 10, 2026, noon UTC, so every run sees the same months and statuses.
 // Every wait is for a condition with a deadline, never a fixed time (GitHub's machines are slower).
@@ -134,8 +134,14 @@ context.on('request', (r) => { if (!r.url().startsWith(base) && !/^(data|blob):/
 const squash = (s) => (s == null ? null : s.replace(/\s+/g, ' ').trim());
 const text = async (sel) => squash(await page.evaluate((s) => document.querySelector(s)?.textContent ?? null, sel));
 const value = (sel) => page.evaluate((s) => document.querySelector(s)?.value ?? null, sel);
-const chip = () => page.evaluate(() => { const c = document.getElementById('changes-chip'); return c.hidden ? '' : c.textContent; });
-const monthShown = () => page.evaluate(() => document.getElementById('month-select')?.selectedOptions[0]?.textContent ?? null);
+const chip = () => page.evaluate(() => document.getElementById('changes-chip').textContent);
+const UP_TO_DATE = '✓ Up to date';
+/** The month open in the Ledger, with ✓ or ⚠ from its status ("October 2026 ⚠"), or null. */
+const monthShown = () => page.evaluate(() => {
+  const t = document.getElementById('month-title')?.textContent;
+  const st = document.getElementById('month-status')?.textContent ?? '';
+  return t ? `${t}${st.startsWith('✓') ? ' ✓' : st.startsWith('⚠') ? ' ⚠' : ''}` : null;
+});
 /** The value next to a label in a <dl> on the screen ("Not exported" -> "3 entries"). */
 const fact = async (label) => squash(await page.evaluate((l) =>
   [...document.querySelectorAll('main dt')].find((dt) => dt.textContent.trim() === l)?.nextElementSibling?.textContent ?? null, label));
@@ -155,11 +161,16 @@ const stored = (key, path = '') => page.evaluate(([key, path]) => new Promise((r
 }), [key, path]);
 
 const tab = (name) => page.click(`.tabs button[data-tab="${name}"]`);
-/** Open a page under ☰ More ("Import & export", "History", ...). */
-async function more(label) {
-  await page.click('#more-btn');
-  await page.locator('.menu-item', { hasText: label }).click();
-  await soon(`More → ${label} opens`, () => text('.sub-head h2'), label);
+/** The Workbook page, from the chip in the top bar. */
+async function workbook() {
+  await page.click('#changes-chip');
+  await soon('the chip opens the Workbook page', () => text('.sub-head h2'), 'Workbook');
+}
+/** A month's entry screen, from its row in the Ledger ("October 2026"). */
+async function openMonth(label) {
+  await tab('ledger');
+  await page.click(`.month-row:has(.month-name:text-matches("^${label}"))`);
+  await soon(`${label} opens`, () => text('#month-title'), label);
 }
 async function fitsPhone(screen) {
   const width = await page.evaluate(() => document.documentElement.scrollWidth);
@@ -192,7 +203,7 @@ step(`imports a synthetic workbook ("${SCENARIO}") and opens the month to fill`,
   await soon('the Month screen opens on October 2026 (past, incomplete)', monthShown, 'October 2026 ⚠');
   assert.equal(await text('#month-status'), '⚠ Needs balances');
   assert.equal(await text('#missing-count'), '2 required missing');
-  assert.equal(await chip(), '', 'nothing is waiting to be exported right after an import');
+  assert.equal(await chip(), UP_TO_DATE, 'nothing is waiting to be exported right after an import');
   await fitsPhone('the Month screen');
 });
 
@@ -227,33 +238,37 @@ step('Dashboard: one screen answers "are we OK, and does anything need me?"', as
   await fitsPhone('the Dashboard');
 });
 
-step('Net worth opens History; the phone\'s Back button returns to the More menu', async () => {
+step('Net worth opens the Ledger; a month opens and Back returns; the warning line and the chip open their pages', async () => {
   const v = dashboardView(calculate(structuredClone(before), TODAY), before, TODAY);
   await page.click('.tile:has-text("Net worth")');
-  await soon('History opens', () => text('.sub-head h2'), 'History');
+  await soon('the Ledger opens', () => text('#next-fill .line-title'), 'Next: October 2026');
   assert.equal(await text('#h-year h2'), 'This year (2026)');
   assert.equal(await fact('Income'), whole(v.flow.rows[0][3]), 'this year\'s income');
   assert.equal(await text('#h-avg h2'), 'Average month (last 3 full)');
   const months = await page.evaluate(() => [...document.querySelectorAll('#h-months .month-name')].map((n) => n.textContent));
   assert.equal(months[0], 'November 2026', 'newest first (the current month, in progress)');
-  assert.equal(months.at(-1), 'April 2026 ✓', 'back to the first month after the opening date');
-  assert.equal(months.length, 8);
-  await fitsPhone('History');
+  assert.equal(months.at(-1), 'March 2026', 'back to the first month in the workbook (history only)');
+  assert.equal(months.length, 9);
+  await fitsPhone('the Ledger');
+  await page.click('.month-row:has-text("September 2026")');
+  await soon('September opens', monthShown, 'September 2026 ✓');
   await page.goBack();
-  await soon('Back returns to the More menu', () => page.evaluate(() => [...document.querySelectorAll('.menu-title')].map((t) => t.firstChild.textContent)),
-    ['History', 'Import & export', 'Health checks', 'About']);
-  await page.locator('.menu-item', { hasText: 'Health checks' }).click();
-  await soon('Health checks lists what needs attention, then what is fine',
+  await soon('Back returns to the Ledger list', () => text('#next-fill .line-title'), 'Next: October 2026');
+  await tab('dashboard');
+  await page.click('#attention');
+  await soon('the warning line opens Health checks: what needs attention, then what is fine',
     () => page.evaluate(() => [...document.querySelectorAll('main .checks li')].map((li) => li.textContent)),
     [...v.health.filter((x) => !x.startsWith('✓')), ...v.health.filter((x) => x.startsWith('✓'))]);
-  await page.click('.back-btn');
-  await page.locator('.menu-item', { hasText: 'About' }).click();
-  await soon('About shows the version', () => fact('Version'), (x) => /^\d+\.\d+\.\d+/.test(x ?? ''));
-  await fitsPhone('About');
-  await tab('dashboard');
+  await page.goBack();
+  await soon('Back returns to the Dashboard', () => page.isVisible('.tiles'), true);
+  await workbook();
+  assert.ok(/^\d+\.\d+\.\d+/.test(await fact('Version') ?? ''), 'the Workbook page shows the version');
+  await fitsPhone('the Workbook page');
+  await page.goBack();
+  await soon('Back closes the Workbook page', () => page.isVisible('.tiles'), true);
 });
 
-step('Month: a required balance changes the status, and × clears it', async () => {
+step('Ledger, October: a required balance changes the status, and × clears it', async () => {
   await page.click('.as-of button'); // "Fill October 2026 →"
   await soon('"Fill October 2026" opens that month', monthShown, 'October 2026 ⚠');
   await page.fill('#f-balances-0', '10000');
@@ -274,7 +289,7 @@ step('Month: a required balance changes the status, and × clears it', async () 
   assert.equal(await chip(), '1 not exported');
 });
 
-step('Month: ± on "Moved into" puts in a minus sign, and flips a number and saves it', async () => {
+step('Ledger, October: ± on "Moved into" puts in a minus sign, and flips a number and saves it', async () => {
   assert.equal((await text('label[for="f-deposits-0"]')).startsWith('Moved into Roth IRA'), true);
   const sign = '.input-wrap:has(#f-deposits-0) .sign';
   await page.click(sign);
@@ -315,7 +330,7 @@ step('reload: the entries stay on the phone (IndexedDB), still waiting to be exp
   await soon('the donation is saved on the phone', () => stored('data', 'giving'), (g) => g?.some((x) => x.recipient === GIFT.recipient));
   await page.reload();
   await soon('after the reload, 3 entries are not exported', chip, '3 not exported');
-  await tab('month');
+  await openMonth('October 2026');
   await soon('the balance is still there', () => value('#f-balances-0'), '10,000');
   assert.equal(await value('#f-deposits-0'), '-250');
   assert.equal(await value('#f-balances-2'), '');
@@ -324,9 +339,8 @@ step('reload: the entries stay on the phone (IndexedDB), still waiting to be exp
 });
 
 let shared;
-step('Import & export: export sends the workbook to the share sheet', async () => {
-  await soon('the More button shows no export-due dot (the last export was today)', () => page.isHidden('#more-dot'), true);
-  await more('Import & export');
+step('Workbook page: export sends the workbook to the share sheet', async () => {
+  await workbook();
   await soon('Import & export shows what is not exported', () => fact('Not exported'), '3 entries');
   await fitsPhone('the Import & export screen');
   await page.getByRole('button', { name: 'Export workbook' }).click();
@@ -335,7 +349,7 @@ step('Import & export: export sends the workbook to the share sheet', async () =
   assert.equal(shared.name, 'goals 2026-11-10 12.00 PM.xlsx');
   assert.equal(shared.type, XLSX_TYPE);
   await soon('the app says it exported', () => text('main p.status'), `Exported ${shared.name}.`);
-  await soon('nothing is left to export', chip, '');
+  await soon('nothing is left to export', chip, UP_TO_DATE);
   assert.equal(await fact('Not exported'), '✓ nothing');
   assert.ok((await fact('Last export')).startsWith('Nov 10, 2026'), `Last export: ${await fact('Last export')}`);
 });
@@ -363,12 +377,12 @@ step('the shared file, read back with src/import.js, holds exactly the entries m
 
 step('reload after the export: the export is remembered and the entries stay', async () => {
   await page.reload();
-  await more('Import & export');
+  await workbook();
   await soon('the stamp of the export shows', () => fact('Stamp in file'), 'exported Nov 10, 2026, 12:00 PM');
   assert.equal(await fact('Not exported'), '✓ nothing');
   assert.equal(await fact('Workbook'), shared.name);
-  assert.equal(await chip(), '');
-  await tab('month');
+  assert.equal(await chip(), UP_TO_DATE);
+  await openMonth('October 2026');
   await soon('the balance is still there', () => value('#f-balances-0'), '10,000');
 });
 
@@ -416,6 +430,58 @@ step('Goals: Edit changes the type, and fields it no longer uses are cleared', a
     (t) => t?.endsWith('This quarter'));
   assert.equal(await chip(), '1 not exported', 'one goal changed since the export');
   await fitsPhone('the Goals tab with the new goal');
+});
+
+step('Ledger: in October, add a card and a side job, close the emergency fund and end the salary', async () => {
+  await openMonth('October 2026');
+  await page.click('#add-accounts-open');
+  await page.click('#add-accounts-form .btn.primary');
+  await soon('a nameless account is refused', () => text('#add-accounts-form p.status'), 'Give it a name.');
+  await page.fill('#add-accounts-name', 'Checking A');
+  await page.click('#add-accounts-form .btn.primary');
+  await soon('a name already used is refused', () => text('#add-accounts-form p.status'), '"Checking A" is already used. Pick another name.');
+  await page.fill('#add-accounts-name', 'Card B');
+  await page.selectOption('#add-accounts-type', 'Card');
+  await fitsPhone('the add-account form');
+  await page.click('#add-accounts-form .btn.primary');
+  await soon('Card B is a field in Balances', () => text('label[for="f-balances-3"]'), 'Card BCard · amount owed');
+  await soon('it is saved, starting at $0 and not required', () => stored('data', 'accounts.3'),
+    (a) => a?.name === 'Card B' && a.type === 'Card' && a.opening === 0 && a.required === 'No' && a.active === 'Yes');
+  await page.fill('#f-balances-3', '300');
+  await page.press('#f-balances-3', 'Enter');
+  await soon('its October balance is saved', () => stored('data', `months.${OCT}.balances.3`), { kind: 'typed', value: 300 });
+
+  await page.click('.field:has(#f-balances-1) .manage');
+  await page.getByRole('button', { name: 'Close in October 2026' }).click();
+  await page.getByRole('button', { name: 'Close account' }).click();
+  await soon('the emergency fund is closed: $0 in October', () => stored('data', `months.${OCT}.balances.1`), { kind: 'typed', value: 0 });
+  assert.equal(await stored('data', 'accounts.1.active'), 'No');
+  await soon('it shows as closed', () => text('label[for="f-balances-1"] .hint'), 'Savings · closed');
+
+  await page.click('#add-sources-open');
+  await page.fill('#add-sources-name', 'Side job');
+  await page.selectOption('#add-sources-tithe', 'Yes');
+  await page.fill('#add-sources-usual', '400');
+  await page.selectOption('#add-sources-frequency', 'Monthly');
+  await page.fill('#add-sources-day', '15');
+  await page.click('#add-sources-form .btn.primary');
+  await soon('the side job is a field in Income', () => text('label[for="f-income-1"]'), (t) => t?.startsWith('Side job'));
+  await soon('it counts from October 1', () => stored('data', 'sources.1'),
+    (x) => x?.from === dateSerial('2026-10-01') && x.usual === 400 && x.frequency === 'Monthly' && x.day === 15);
+  assert.equal(await page.getAttribute('#f-income-1', 'placeholder'), '400', 'its automatic pay shows in grey');
+
+  await page.click('.field:has(#f-income-0) .manage');
+  await page.getByRole('button', { name: 'Ended in October 2026' }).click();
+  await page.getByRole('button', { name: 'It ended this month' }).click();
+  await soon('the salary ends on October 31', () => stored('data', 'sources.0.until'), dateSerial('2026-10-31'));
+
+  await page.click('.field:has(#f-balances-3) .manage');
+  await page.getByRole('button', { name: 'Rename' }).click();
+  await page.fill('.manage-panel .rename input', 'Card B (travel)');
+  await page.getByRole('button', { name: 'Save name' }).click();
+  await soon('the card is renamed', () => stored('data', 'accounts.3.name'), 'Card B (travel)');
+  await soon('the chip counts what is waiting', chip, (c) => /^\d+ not exported$/.test(c ?? '') && c !== '1 not exported');
+  await fitsPhone('October with the new accounts');
 });
 
 // ---------- run them, in order, stopping at the first failure ----------
