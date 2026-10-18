@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
 - Goals can be added, changed and deleted on the Dashboard. The form asks only for what the goal's type needs, with choices from your workbook. Export writes them into the goal rows of Settings, and nothing else there; other settings are still changed in Excel.
 
