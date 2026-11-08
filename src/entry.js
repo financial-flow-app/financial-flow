@@ -402,7 +402,7 @@ export function monthView(data, out, i) {
     const owed = is(a.type, 'Card') || is(a.type, 'Loan');
     accounts.push({
       key: 'balances', slot: k, label: String(a.name), cell: m.balances[k], required, retired,
-      hint: [a.type, owed ? 'amount owed' : null, retired ? 'closed' : null].filter(Boolean).join(' · '),
+      hint: [a.type, owed ? 'owed on the last day' : null, retired ? 'closed' : null].filter(Boolean).join(' · '),
       auto: required || future || pre || m.balances[k].kind !== 'auto' ? null : r[`Val${k}`],
     });
   });

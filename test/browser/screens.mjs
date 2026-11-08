@@ -444,7 +444,7 @@ step('Ledger: in October, add a card and a side job, close the emergency fund an
   await page.selectOption('#add-accounts-type', 'Card');
   await fitsPhone('the add-account form');
   await page.click('#add-accounts-form .btn.primary');
-  await soon('Card B is a field in Balances', () => text('label[for="f-balances-3"]'), 'Card BCard · amount owed');
+  await soon('Card B is a field in Balances', () => text('label[for="f-balances-3"]'), 'Card BCard · owed on the last day');
   await soon('it is saved, starting at $0 and not required', () => stored('data', 'accounts.3'),
     (a) => a?.name === 'Card B' && a.type === 'Card' && a.opening === 0 && a.required === 'No' && a.active === 'Yes');
   await page.fill('#f-balances-3', '300');

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.2
+
+- Clearer balance wording in the Ledger: every balance is as of the last day of the month, and a card or loan is what was owed that day (its current balance, not the statement). A statement balance is from a different day than the bank balances, so a card payment made in between was counted as spending one month and taken back the next. Paying a card early or in parts doesn't change spending, as long as every balance is from the same day.
+
 ## 0.8.1
 
 - Safer updates: a new version's files are fetched under its build number, so GitHub's cache can't hand back an older copy, and they're kept only if their fingerprint matches the build. An update can no longer store a mix of old and new files; if something doesn't match, the version already on the phone keeps working and the next visit tries again.
