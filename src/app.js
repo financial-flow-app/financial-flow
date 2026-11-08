@@ -348,7 +348,7 @@ function monthScreen(i) {
   if (view.phase === 'pre') {
     sections.push(h('section', { class: 'card' }, h('p', { class: 'help' }, 'Before the opening date, balances aren\'t used. Income and giving still count toward tithe.')));
   } else {
-    sections.push(card('Balances', 'Month-end balances. Cards and loans: the amount owed.',
+    sections.push(card('Balances', 'Every balance as of the last day of the month. Cards and loans: what was owed that day (the current balance, not the statement).',
       [view.accounts.map((f) => field(i, f, false, manage('accounts', f, { retired: f.retired }))),
         addForm(i, 'accounts')],
       h('span', { class: 'count', id: 'missing-count' })));

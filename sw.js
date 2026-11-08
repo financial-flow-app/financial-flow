@@ -3,8 +3,8 @@
 // - A new version installs in the background and then WAITS. It takes over only when the
 //   user taps "Update" (the page sends {type: 'skipWaiting'}), so code never changes silently.
 
-const VERSION = '0.8.1'; // same as src/version.js
-const BUILD = '4bb950f7e038'; // fingerprint of FILES, written by scripts/stamp.mjs
+const VERSION = '0.8.2'; // same as src/version.js
+const BUILD = '5ce1b8d73395'; // fingerprint of FILES, written by scripts/stamp.mjs
 const CACHE = `financial-flow-${VERSION}-${BUILD}`;
 const FILES = [
   './',
